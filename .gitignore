@@ -19,3 +19,9 @@
 *.exe
 *.out
 *.app
+
+# Other garbage
+wadutils.*
+*.wad
+*.WAD
+*.txt
