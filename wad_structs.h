@@ -12,9 +12,18 @@ struct wadinfo_t
 
 struct filelump_t
 {
-	uint32_t filepos ;
+	uint32_t filepos;
 	uint32_t size;
 	char name[8];
+};
+
+struct __attribute__((__packed__)) thing_doom_t
+{
+	int16_t xpos;
+	int16_t ypos;
+	uint16_t angle;
+	uint16_t type;
+	uint16_t flags;
 };
 
 struct __attribute__((__packed__)) thing_hexen_t
@@ -51,6 +60,17 @@ enum thing_hexen_flags
 	THF_ALTSHADOW   = 1 << 12,
 	THF_FRIENDLY    = 1 << 13,
 	THF_STANDSTILL  = 1 << 14,
+};
+
+struct __attribute__((__packed__)) linedef_doom_t
+{
+	uint16_t beginvertex;
+	uint16_t endvertex;
+	uint16_t flags;
+	uint16_t type;
+	uint16_t sectag;
+	uint16_t rsidedef;
+	uint16_t lsidedef;
 };
 
 struct __attribute__((__packed__)) linedef_hexen_t

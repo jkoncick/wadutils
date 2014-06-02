@@ -9,7 +9,7 @@ int main (int argc, char *argv[])
 	}
 
 	// Process all wads given on commandline
-	for (unsigned int n = 1; n < argc; n++)
+	for (int n = 1; n < argc; n++)
 	{
 		WadFile wadfile;
 		if (!wadfile.load_wad_file(argv[n]))
@@ -21,7 +21,7 @@ int main (int argc, char *argv[])
 		while ((map_lump_pos = wadfile.find_next_lump_by_type(LT_MAP_HEADER)) != -1)
 		{
 			bool hexen_format = lumps[map_lump_pos].subtype == MF_HEXEN;
-			bool scripts_present = hexen_format && lumps.size() > map_lump_pos + ML_SCRIPTS &&
+			bool scripts_present = hexen_format && (signed)lumps.size() > map_lump_pos + ML_SCRIPTS &&
 					lumps[map_lump_pos + ML_SCRIPTS].name == wfMapLumpTypeStr[ML_SCRIPTS];
 			int count_up_to = hexen_format?(scripts_present?ML_SCRIPTS:ML_BEHAVIOR):ML_BLOCKMAP;
 			int total_size = 0;
@@ -32,9 +32,11 @@ int main (int argc, char *argv[])
 			printf("MAP %-8s (total %7d bytes)\n", lumps[map_lump_pos].name.c_str(), total_size);
 			printf("----------------------------------\n");
 			int things_size = lumps[map_lump_pos + ML_THINGS].size;
-			printf("Things    %5d (%6d bytes)\n", things_size / (hexen_format?sizeof(thing_hexen_t):10), things_size);
+			int things_num = things_size / (hexen_format?sizeof(thing_hexen_t):sizeof(thing_doom_t));
+			printf("Things    %5d (%6d bytes)\n", things_num, things_size);
 			int linedefs_size = lumps[map_lump_pos + ML_LINEDEFS].size;
-			printf("Linedefs  %5d (%6d bytes)\n", linedefs_size / (hexen_format?sizeof(linedef_hexen_t):14), linedefs_size);
+			int linedefs_num = linedefs_size / (hexen_format?sizeof(linedef_hexen_t):sizeof(linedef_doom_t));
+			printf("Linedefs  %5d (%6d bytes)\n", linedefs_num, linedefs_size);
 			int sidedefs_size = lumps[map_lump_pos + ML_SIDEDEFS].size;
 			printf("Sidedefs  %5d (%6d bytes)\n", sidedefs_size / sizeof(sidedef_t), sidedefs_size);
 			int sectors_size = lumps[map_lump_pos + ML_SECTORS].size;

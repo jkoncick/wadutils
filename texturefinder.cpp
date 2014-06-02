@@ -13,7 +13,7 @@ int main (int argc, char *argv[])
 	set<string> texture_names;
 
 	// Process all wads given on commandline
-	for (unsigned int n = 1; n < argc; n++)
+	for (int n = 1; n < argc; n++)
 	{
 		WadFile wadfile;
 		if (!wadfile.load_wad_file(argv[n]))

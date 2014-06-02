@@ -79,6 +79,7 @@ public:
 	const char *get_lump_name(int lump_pos);
 	int get_lump_size(int lump_pos);
 	char *get_lump_data(int lump_pos);
+	int get_lump_subtype(int lump_pos);
 
 	void replace_lump_data(int lump_pos, char *data, int size);
 	void drop_lump_data(int lump_pos);

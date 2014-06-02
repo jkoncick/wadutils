@@ -16,6 +16,5 @@ int main (int argc, char *argv[])
 		wfLump &lump = lumps[i];
 		printf("%-8s %6d %-8x %d\n", lump.name.c_str(), lump.size, lump.source_file_pos, lump.type);
 	}
-	wadfile.save_wad_file((string(argv[1])+"_copy").c_str());
 	return 0;
 }

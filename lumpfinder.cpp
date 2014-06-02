@@ -20,7 +20,7 @@ int main (int argc, char *argv[])
 			lumps_to_search[tmp];
 	}
 	// Process all wads given on commandline
-	for (unsigned int n = 1; n < argc; n++)
+	for (int n = 1; n < argc; n++)
 	{
 		WadFile wadfile;
 		if (!wadfile.load_wad_file(argv[n]))
@@ -43,7 +43,7 @@ int main (int argc, char *argv[])
 	for (map<string, vector<char *> >::iterator it = lumps_to_search.begin(); it != lumps_to_search.end(); it++)
 	{
 		printf("%-8s :", it->first.c_str());
-		for (int i = 0; i < it->second.size(); i++)
+		for (unsigned int i = 0; i < it->second.size(); i++)
 			printf(" %s", basename(it->second[i]));
 		printf("\n");
 	}

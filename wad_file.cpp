@@ -140,12 +140,13 @@ bool WadFile::save_wad_file(const char* filename)
 
 	free(lump_directory);
 	fclose(target_file);
+	return true;
 }
 
 bool WadFile::save_lump_into_file(int lump_pos)
 {
 	// Invalid lump position
-	if (lump_pos < 0 || lump_pos >= lumps.size())
+	if (lump_pos < 0 || lump_pos >= (signed)lumps.size())
 		return false;
 	// Save the lump
 	char *data = get_lump_data(lump_pos);
@@ -192,7 +193,7 @@ int WadFile::find_next_lump_by_type(wfLumpType type)
 
 const char *WadFile::get_lump_name(int lump_pos)
 {
-	if (lump_pos >= 0 && lump_pos < lumps.size())
+	if (lump_pos >= 0 && lump_pos < (signed)lumps.size())
 		return lumps[lump_pos].name.c_str();
 	else
 		return NULL;
@@ -200,7 +201,7 @@ const char *WadFile::get_lump_name(int lump_pos)
 
 int WadFile::get_lump_size(int lump_pos)
 {
-	if (lump_pos >= 0 && lump_pos < lumps.size())
+	if (lump_pos >= 0 && lump_pos < (signed)lumps.size())
 		return lumps[lump_pos].size;
 	else
 		return -1;
@@ -209,7 +210,7 @@ int WadFile::get_lump_size(int lump_pos)
 char *WadFile::get_lump_data(int lump_pos)
 {
 	// Invalid lump position
-	if (lump_pos < 0 || lump_pos >= lumps.size())
+	if (lump_pos < 0 || lump_pos >= (signed)lumps.size())
 		return NULL;
 	wfLump &lump = lumps[lump_pos];
 	// Data already exist
@@ -229,9 +230,17 @@ char *WadFile::get_lump_data(int lump_pos)
 	return data;
 }
 
+int WadFile::get_lump_subtype(int lump_pos)
+{
+	if (lump_pos >= 0 && lump_pos < (signed)lumps.size())
+		return lumps[lump_pos].subtype;
+	else
+		return -1;
+}
+
 void WadFile::replace_lump_data(int lump_pos, char *data, int size)
 {
-	if (lump_pos < 0 || lump_pos >= lumps.size())
+	if (lump_pos < 0 || lump_pos >= (signed)lumps.size())
 		return;
 	drop_lump_data(lump_pos);
 	wfLump &lump = lumps[lump_pos];
@@ -242,7 +251,7 @@ void WadFile::replace_lump_data(int lump_pos, char *data, int size)
 
 void WadFile::drop_lump_data(int lump_pos)
 {
-	if (lump_pos < 0 || lump_pos >= lumps.size())
+	if (lump_pos < 0 || lump_pos >= (signed)lumps.size())
 		return;
 	wfLump &lump = lumps[lump_pos];
 	if (lump.data == NULL)
