@@ -14,7 +14,7 @@ int main (int argc, char *argv[])
 	for (unsigned int i = 0; i < lumps.size(); i++)
 	{
 		wfLump &lump = lumps[i];
-		printf("%-8s %6d %-8x %d\n", lump.name.c_str(), lump.size, lump.source_file_pos, lump.type);
+		printf("%-8s %7d %-8x %d\n", lump.name.c_str(), lump.size, lump.source_file_pos, lump.type);
 	}
 	return 0;
 }

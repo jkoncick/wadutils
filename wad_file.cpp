@@ -22,7 +22,7 @@ WadFile::~WadFile()
 		fclose(source_file);
 	for (unsigned int i = 0; i < lumps.size(); i++)
 	{
-		if (lumps[i].data != NULL)
+		if (lumps[i].data != NULL && !lumps[i].dont_free)
 			free(lumps[i].data);
 	}
 }
@@ -64,6 +64,8 @@ bool WadFile::load_wad_file(const char* filename)
 		lump.data = NULL;
 		lump.type = LT_UNKNOWN;
 		lump.subtype = 0;
+		lump.deleted = false;
+		lump.dont_free = false;
 		// Detect map header lump
 		if (map_start_pos != -1)
 		{
@@ -85,9 +87,16 @@ bool WadFile::load_wad_file(const char* filename)
 				map_start_pos = -1;
 			}
 		}
-		if (lump.name == wfMapLumpTypeStr[ML_THINGS])
+		else if (lump.name == wfMapLumpTypeStr[ML_THINGS])
 		{
+			// First lump in Doom/Hexen format is THINGS
 			map_start_pos = i - 1;
+		}
+		else if (lump.name == "TEXTMAP" && i > 0)
+		{
+			// First lump in UDMF format is TEXTMAP
+			lumps[i-1].type = LT_MAP_HEADER;
+			lumps[i-1].subtype = MF_UDMF;
 		}
 	}
 	free(lump_directory);
@@ -95,7 +104,7 @@ bool WadFile::load_wad_file(const char* filename)
 	return true;
 }
 
-bool WadFile::save_wad_file(const char* filename)
+bool WadFile::save_wad_file(const char* filename, bool drop_contents)
 {
 	// Open wad file
 	FILE *target_file = fopen(filename, "wb");
@@ -106,34 +115,39 @@ bool WadFile::save_wad_file(const char* filename)
 	}
 
 	// Write all lumps and lump directory
-	filelump_t *lump_directory = (filelump_t *)malloc(sizeof(filelump_t) * lumps.size());
+	filelump_t *lump_directory = (filelump_t *)calloc(lumps.size(), sizeof(filelump_t));
 	int cur_pos = sizeof(wadinfo_t);
+	int cur_lump = 0;
 	fseek(target_file, sizeof(wadinfo_t), SEEK_SET);
 
 	for (unsigned int i = 0; i < lumps.size(); i++)
 	{
 		wfLump &lump = lumps[i];
-		memset(lump_directory[i].name, 0, 8);
-		strncpy(lump_directory[i].name, lump.name.c_str(), 8);
-		lump_directory[i].filepos = cur_pos;
+		if (lump.deleted)
+			continue;
+		strncpy(lump_directory[cur_lump].name, lump.name.c_str(), 8);
+		lump_directory[cur_lump].filepos = cur_pos;
 		char *data = get_lump_data(i);
 		if (data == NULL)
 		{
-			lump_directory[i].size = 0;
+			lump_directory[cur_lump].size = 0;
 		}
 		else
 		{
-			lump_directory[i].size = lump.size;
+			lump_directory[cur_lump].size = lump.size;
 			fwrite(data, 1, lump.size, target_file);
 			cur_pos += lump.size;
 		}
+		if (drop_contents)
+			drop_lump_data(i);
+		cur_lump++;
 	}
-	fwrite(lump_directory, sizeof(filelump_t), lumps.size(), target_file);
+	fwrite(lump_directory, sizeof(filelump_t), cur_lump, target_file);
 
 	// Write wad header
 	wadinfo_t header;
 	strncpy(header.identification, "PWAD", 4);
-	header.numnlumps = lumps.size();
+	header.numnlumps = cur_lump;
 	header.infotableofs = cur_pos;
 	fseek(target_file, 0, SEEK_SET);
 	fwrite(&header, sizeof(wadinfo_t), 1, target_file);
@@ -179,7 +193,7 @@ int WadFile::find_next_lump_by_name(const string &name)
 	return -1;
 }
 
-int WadFile::find_next_lump_by_type(wfLumpType type)
+int WadFile::find_next_lump_by_type(int type)
 {
 	for (unsigned int i = cursor_pos + 1; i < lumps.size(); i++)
 	{
@@ -238,7 +252,7 @@ int WadFile::get_lump_subtype(int lump_pos)
 		return -1;
 }
 
-void WadFile::replace_lump_data(int lump_pos, char *data, int size)
+void WadFile::replace_lump_data(int lump_pos, char *data, int size, bool nofree)
 {
 	if (lump_pos < 0 || lump_pos >= (signed)lumps.size())
 		return;
@@ -247,6 +261,7 @@ void WadFile::replace_lump_data(int lump_pos, char *data, int size)
 	lump.source_file_pos = 0;
 	lump.data = data;
 	lump.size = size;
+	lump.dont_free = nofree;
 }
 
 void WadFile::drop_lump_data(int lump_pos)
@@ -256,6 +271,30 @@ void WadFile::drop_lump_data(int lump_pos)
 	wfLump &lump = lumps[lump_pos];
 	if (lump.data == NULL)
 		return;
-	free(lump.data);
+	if (!lumps[lump_pos].dont_free)
+		free(lump.data);
 	lump.data = NULL;
+}
+
+void WadFile::delete_lump(int lump_pos, bool drop_contents)
+{
+	if (lump_pos < 0 || lump_pos >= (signed)lumps.size())
+		return;
+	lumps[lump_pos].deleted = true;
+	if (drop_contents)
+		drop_lump_data(lump_pos);
+}
+
+void WadFile::append_lump(string name, int size, char *data, int type, int subtype, bool nofree)
+{
+	lumps.resize(lumps.size() + 1);
+	wfLump &lump = lumps[lumps.size() - 1];
+	lump.name = name;
+	lump.source_file_pos = 0;
+	lump.size = size;
+	lump.data = data;
+	lump.type = type;
+	lump.subtype = subtype;
+	lump.deleted = false;
+	lump.dont_free = nofree;
 }

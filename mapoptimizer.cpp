@@ -61,6 +61,9 @@ int main (int argc, char *argv[])
 		int map_lump_pos;
 		while ((map_lump_pos = wadfile.find_next_lump_by_type(LT_MAP_HEADER)) != -1)
 		{
+			if (wadfile.get_lump_subtype(map_lump_pos) == MF_UDMF)
+				continue;
+
 			bool hexen_format = wadfile.get_lump_subtype(map_lump_pos) == MF_HEXEN;
 
 			// Load SECTORS lump and prepare the modified one
@@ -227,7 +230,7 @@ int main (int argc, char *argv[])
 
 			// 2c) Write new SECTORS lump into wad file, update statistics and free used memory
 			sectors_new_size = sectors_new_num * sizeof(sector_t);
-			wadfile.replace_lump_data(map_lump_pos + ML_SECTORS, (char *)sectors_new_data, sectors_new_size);
+			wadfile.replace_lump_data(map_lump_pos + ML_SECTORS, (char *)sectors_new_data, sectors_new_size, false);
 			joined_sectors += sectors_old_num - sectors_new_num;
 			saved_bytes_sectors += sectors_old_size - sectors_new_size;
 			delete [] sector_remapping;
@@ -290,7 +293,7 @@ int main (int argc, char *argv[])
 
 			// 3c) Write new SIDEDEFS lump into wad file, update statistics and free used memory
 			sidedefs_new_size = sidedefs_new_num * sizeof(sidedef_t);
-			wadfile.replace_lump_data(map_lump_pos + ML_SIDEDEFS, (char *)sidedefs_new_data, sidedefs_new_size);
+			wadfile.replace_lump_data(map_lump_pos + ML_SIDEDEFS, (char *)sidedefs_new_data, sidedefs_new_size, false);
 			joined_sidedefs += sidedefs_old_num - sidedefs_new_num;
 			saved_bytes_sidedefs += sidedefs_old_size - sidedefs_new_size;
 			delete [] sidedefs_remapping;
@@ -302,7 +305,7 @@ int main (int argc, char *argv[])
 			if (arg_drop_reject && wadfile.get_lump_size(map_lump_pos + ML_REJECT) > 0)
 			{
 				saved_bytes_reject += wadfile.get_lump_size(map_lump_pos + ML_REJECT);
-				wadfile.replace_lump_data(map_lump_pos + ML_REJECT, NULL, 0);
+				wadfile.replace_lump_data(map_lump_pos + ML_REJECT, NULL, 0, false);
 				dropped_reject = true;
 			}
 
