@@ -1,5 +1,6 @@
 #include "wad_file.h"
 
+// Type of parsed line of TEXTMAP lump
 enum TextMapLineType
 {
 	LN_NONE,
@@ -17,6 +18,7 @@ enum TextMapLineType
 	VAL_STRING
 };
 
+// Entity types
 enum EntityType
 {
 	ET_THING,
@@ -35,14 +37,41 @@ const char *entity_type_str[] =
 	"Sector"
 };
 
+#define MAX_THINGS 4096
+#define MAX_VERTEXES 16384
+#define MAX_LINEDEFS 16384
+#define MAX_SIDEDEFS 32768
+#define MAX_SECTORS 8192
+
+// More linedef properties not directly settable
+struct linedef_more_props
+{
+	uint16_t lineid;
+	uint8_t alpha;
+	uint8_t flags;
+	bool alpha_set;
+	bool additive;
+};
+
+enum linedef_more_flags
+{
+	LMF_ZONEBOUNDARY        = 1 << 0,
+	LMF_RAILING             = 1 << 1,
+	LMF_BLOCK_FLOATERS      = 1 << 2,
+	LMF_CLIP_MIDTEX         = 1 << 3,
+	LMF_WRAP_MIDTEX         = 1 << 4,
+	LMF_3DMIDTEX            = 1 << 5,
+	LMF_CHECKSWITCHRANGE    = 1 << 6,
+};
+
 TextMapLineType parse_next_line(char *mapdata, bool inside_entity, int *position,
-								char **key, char **str_value, int *int_value, int *frac_value)
+								char **key, char **str_value, int *int_value, float *float_value)
 {
 	char *line = mapdata + *position;
 	char *line_end = strchr(line, '\n');
 	int next_line_pos = *position + (line_end - line) + 1;
 	*position = next_line_pos;
-	*frac_value = 0;
+	*float_value = 0.0;
 	if (line == line_end)
 		return LN_NONE;
 	if (!inside_entity)
@@ -95,13 +124,13 @@ TextMapLineType parse_next_line(char *mapdata, bool inside_entity, int *position
 		return VAL_INT;
 	}
 	// Float value. Get integral part and round according to frac part.
+	*float_value = atof(value);
 	*frac = '\0';
 	int int_part = atoi(value);
 	if (frac[1] >= '5')
 		int_part++;
 	*int_value = int_part;
 	int frac_part = atoi(frac + 1);
-	*frac_value = frac_part;
 	return frac_part?VAL_FLOAT:VAL_INT;
 }
 
@@ -166,8 +195,11 @@ bool process_thing(thing_hexen_t *thing, char *key, int int_val)
 #define LSETFLAG(str, flag) SETFLAG(linedef, str, flag)
 #define LSETACTV(str, flag) else if (strcmp(key, str) == 0) \
 	{if (linedef->flags & (7 << 10)) return false; linedef->flags |= flag;}
+#define LSETMFLAG(str, flag) SETFLAG(mprops, str, flag)
 
-bool process_linedef(linedef_hexen_t *linedef, char *key, int int_val)
+linedef_more_props linedefs_mprops[MAX_LINEDEFS];
+
+bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char *key, int int_val)
 {
 	if (false);
 	LSETVAL("v1", beginvertex);
@@ -208,6 +240,25 @@ bool process_linedef(linedef_hexen_t *linedef, char *key, int int_val)
 	LSETACTV("playerpush", LHF_SPAC_Push)
 	LSETACTV("missilecross", LHF_SPAC_PCross)
 	LSETACTV("passuse", LHF_SPAC_UseThrough)
+	else if (strcmp(key, "id") == 0)
+		mprops->lineid = int_val;
+	else if (strcmp(key, "alpha") == 0)
+	{
+		mprops->alpha = int_val;
+		mprops->alpha_set = true;
+	}
+	else if (strcmp(key, "translucent") == 0)
+	{
+		mprops->alpha = 192;
+		mprops->alpha_set = true;
+	}
+	LSETMFLAG("zoneboundary", LMF_ZONEBOUNDARY);
+	LSETMFLAG("jumpover", LMF_RAILING);
+	LSETMFLAG("blockfloating", LMF_BLOCK_FLOATERS);
+	LSETMFLAG("clipmidtex", LMF_CLIP_MIDTEX);
+	LSETMFLAG("wrapmidtex", LMF_WRAP_MIDTEX);
+	LSETMFLAG("midtex3d", LMF_3DMIDTEX);
+	LSETMFLAG("checkswitchrange", LMF_CHECKSWITCHRANGE);
 	else
 		return false;
 	return true;
@@ -281,20 +332,21 @@ int main (int argc, char *argv[])
 			char *key;
 			char *str_value;
 			int int_value; // For bool, int and float value
-			int frac_value;
+			float float_value;
 
 			// Binary map lumps
-			thing_hexen_t *things = (thing_hexen_t *)calloc(2000, sizeof(thing_hexen_t));
-			vertex_t *vertexes = (vertex_t *)calloc(10000, sizeof(vertex_t));
-			linedef_hexen_t *linedefs = (linedef_hexen_t *)calloc(15000, sizeof(linedef_hexen_t));
-			sidedef_t *sidedefs = (sidedef_t *)calloc(30000, sizeof(sidedef_t));
-			sector_t *sectors = (sector_t *)calloc(4000, sizeof(sector_t));
+			thing_hexen_t *things = (thing_hexen_t *)calloc(MAX_THINGS, sizeof(thing_hexen_t));
+			vertex_t *vertexes = (vertex_t *)calloc(MAX_VERTEXES, sizeof(vertex_t));
+			linedef_hexen_t *linedefs = (linedef_hexen_t *)calloc(MAX_LINEDEFS, sizeof(linedef_hexen_t));
+			sidedef_t *sidedefs = (sidedef_t *)calloc(MAX_SIDEDEFS, sizeof(sidedef_t));
+			sector_t *sectors = (sector_t *)calloc(MAX_SECTORS, sizeof(sector_t));
+			memset(linedefs_mprops, 0, sizeof(linedef_more_props) * MAX_LINEDEFS);
 
 			// Counters for entities
 			int counters[5] = {0};
 
 			// Initialize linedefs
-			for (int i = 0; i < 15000; i++)
+			for (int i = 0; i < MAX_LINEDEFS; i++)
 			{
 				linedefs[i].rsidedef = 65535;
 				linedefs[i].lsidedef = 65535;
@@ -303,7 +355,7 @@ int main (int argc, char *argv[])
 			// Parse all lines and translate entities
 			while (position < mapdatasize)
 			{
-				line_type = parse_next_line(mapdata, inside_entity, &position, &key, &str_value, &int_value, &frac_value);
+				line_type = parse_next_line(mapdata, inside_entity, &position, &key, &str_value, &int_value, &float_value);
 
 				if (line_type >= ENT_THING && line_type <= ENT_SECTOR)
 				{
@@ -330,6 +382,7 @@ int main (int argc, char *argv[])
 						resolved = process_thing(&things[counters[ET_THING]], key, int_value);
 						break;
 					case ENT_VERTEX:
+					{
 						if (key[0] == 'x')
 							vertexes[counters[ET_VERTEX]].xpos = int_value;
 						else if (key[0] == 'y')
@@ -337,9 +390,15 @@ int main (int argc, char *argv[])
 						else
 							resolved = false;
 						break;
+					}
 					case ENT_LINEDEF:
-						resolved = process_linedef(&linedefs[counters[ET_LINEDEF]], key, int_value);
+					{
+						int cur_linedef = counters[ET_LINEDEF];
+						if (strcmp(key, "alpha") == 0)
+							int_value = (int)(float_value * 255.0);
+						resolved = process_linedef(&linedefs[cur_linedef], &linedefs_mprops[cur_linedef], key, int_value);
 						break;
+					}
 					case ENT_SIDEDEF:
 						resolved = process_sidedef(&sidedefs[counters[ET_SIDEDEF]], key, str_value, int_value);
 						break;
@@ -351,13 +410,15 @@ int main (int argc, char *argv[])
 
 				if (!resolved)
 				{
-					printf("%s %d: ", entity_type_str[current_entity - ENT_THING], counters[current_entity - ENT_THING]);
+					printf("%s %5d: ", entity_type_str[current_entity - ENT_THING], counters[current_entity - ENT_THING]);
 					if (line_type == VAL_STRING)
-						printf("%-14s = %s\n", key, str_value);
-					else if (line_type == VAL_BOOL || line_type == VAL_INT)
-						printf("%-14s = %d\n", key, int_value);
+						printf("%-16s = %s\n", key, str_value);
+					else if (line_type == VAL_BOOL)
+						printf("%-16s = true\n", key);
+					else if (line_type == VAL_INT)
+						printf("%-16s = %d\n", key, int_value);
 					else if (line_type == VAL_FLOAT)
-						printf("%-14s = %d.%d\n", key, int_value, frac_value);
+						printf("%-16s = %.3f\n", key, float_value);
 				}
 			}
 
@@ -372,6 +433,45 @@ int main (int argc, char *argv[])
 			{
 				if (sectors[i].floortex[0] == '\0') sectors[i].floortex[0] = '-';
 				if (sectors[i].ceiltex[0] == '\0') sectors[i].ceiltex[0] = '-';
+			}
+
+			// Fix linedefs with more properties not directly settable
+			for (int i = 0; i < counters[ET_LINEDEF]; i++)
+			{
+				linedef_more_props *mprops = &linedefs_mprops[i];
+				linedef_hexen_t *line = &linedefs[i];
+				if (mprops->alpha_set)
+				{
+					if (line->special != 0)
+						printf("Linedef %5d: Special replaced with TranslucentLine: %d (%d, %d, %d, %d, %d)\n", i,
+							   line->special, line->arg1, line->arg2, line->arg3, line->arg4, line->arg5);
+					line->special = 208;
+					line->arg1 = mprops->lineid & 255;
+					line->arg2 = mprops->alpha;
+					line->arg3 = mprops->additive?1:0;
+					line->arg4 = mprops->flags;
+					line->arg5 = 0;
+				}
+				else if (mprops->flags || mprops->lineid)
+				{
+					if (line->special == 121 && line->arg1 == mprops->lineid && line->arg2 == mprops->flags)
+						continue;
+					if (line->special == 208)
+					{
+						line->arg1 = mprops->lineid & 255;
+						line->arg4 = mprops->flags;
+						continue;
+					}
+					if (line->special != 0)
+						printf("Linedef %5d: Special replaced with SetLineID: %d (%d, %d, %d, %d, %d)\n", i,
+							   line->special, line->arg1, line->arg2, line->arg3, line->arg4, line->arg5);
+					line->special = 121;
+					line->arg1 = mprops->lineid & 255;
+					line->arg2 = mprops->flags;
+					line->arg3 = 0;
+					line->arg4 = 0;
+					line->arg5 = mprops->lineid >> 8;
+				}
 			}
 
 			// Save the map into wad
@@ -414,8 +514,13 @@ int main (int argc, char *argv[])
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SIDEDEFS], sidedefs_size, (char *)sidedefs, 0, 0, false);
 			int vertexes_size = counters[ET_VERTEX] * sizeof(vertex_t);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_VERTEXES], vertexes_size, (char *)vertexes, 0, 0, false);
+			wadfile.append_lump(wfMapLumpTypeStr[ML_SEGS], 0, NULL, 0, 0, false);
+			wadfile.append_lump(wfMapLumpTypeStr[ML_SSECTORS], 0, NULL, 0, 0, false);
+			wadfile.append_lump(wfMapLumpTypeStr[ML_NODES], 0, NULL, 0, 0, false);
 			int sectors_size = counters[ET_SECTOR] * sizeof(sector_t);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SECTORS], sectors_size, (char *)sectors, 0, 0, false);
+			wadfile.append_lump(wfMapLumpTypeStr[ML_REJECT], 0, NULL, 0, 0, false);
+			wadfile.append_lump(wfMapLumpTypeStr[ML_BLOCKMAP], 0, NULL, 0, 0, false);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_BEHAVIOR], behavior_size, behavior_data, 0, 0, true);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SCRIPTS], scripts_size, scripts_data, 0, 0, true);
 		}
