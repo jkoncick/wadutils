@@ -1,4 +1,5 @@
 #include "wad_file.h"
+#include <getopt.h>
 
 // Type of parsed line of TEXTMAP lump
 enum TextMapLineType
@@ -303,12 +304,32 @@ int main (int argc, char *argv[])
 {
 	if (argc < 2)
 	{
-		fprintf(stderr, "You must specify wad filename.\n");
+		printf("Usage: %s [-S] [-n] [-N nodebuilder] wadfile\n", argv[0]);
+		printf("  -S: Do not save resulting wad, just print statistics\n");
+		printf("  -n: Build nodes (runs zdbsp.exe or specified nodebuilder)\n");
+		printf("  -N: Specify path to nodebuilder\n");
 		return 1;
 	}
 
+	// Parse arguments
+	bool arg_dont_save_wad = false;
+	bool arg_build_nodes = false;
+	char *arg_nodebuilder_path = (char *)"zdbsp.exe";
+	int c;
+	while ((c = getopt(argc, argv, "SnN:")) != -1)
+	{
+		if (c == 'S')
+			arg_dont_save_wad = true;
+		else if (c == 'n')
+			arg_build_nodes = true;
+		else if (c == 'N')
+			arg_nodebuilder_path = optarg;
+		else
+			return 1;
+	}
+
 	// Process all wads given on commandline
-	for (int n = 1; n < argc; n++)
+	for (int n = optind; n < argc; n++)
 	{
 		WadFile wadfile;
 		if (!wadfile.load_wad_file(argv[n]))
@@ -525,12 +546,26 @@ int main (int argc, char *argv[])
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SCRIPTS], scripts_size, scripts_data, 0, 0, true);
 		}
 
+		if (arg_dont_save_wad)
+			continue;
+
 		// Finally save the wad
 		// Remove extension from filename
 		char *ext = strrchr(argv[n], '.');
 		if (strcmp(ext, ".wad") == 0 || strcmp(ext, ".WAD") == 0)
 			*ext = '\0';
-		wadfile.save_wad_file((string(argv[n]) + "_hexen.wad").c_str());
+		string result_filename = string(argv[n]) + "_hexen.wad";
+		if (arg_build_nodes)
+		{
+			wadfile.save_wad_file("tmp.wad");
+			char cmd[256];
+			sprintf(cmd, "%s -o %s tmp.wad", arg_nodebuilder_path, result_filename.c_str());
+			system(cmd);
+		}
+		else
+		{
+			wadfile.save_wad_file(result_filename.c_str());
+		}
 	}
 	return 0;
 }

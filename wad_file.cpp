@@ -27,10 +27,11 @@ WadFile::~WadFile()
 	}
 }
 
-bool WadFile::load_wad_file(const char* filename)
+bool WadFile::load_wad_file(const char* filename, bool update)
 {
 	// Open wad file
-	source_file = fopen(filename, "rb");
+	source_file = fopen(filename, update?"r+b":"rb");
+	update_mode = update;
 	if (source_file == NULL)
 	{
 		fprintf(stderr, "Failed to open wad file %s\n",filename);
@@ -262,6 +263,19 @@ void WadFile::replace_lump_data(int lump_pos, char *data, int size, bool nofree)
 	lump.data = data;
 	lump.size = size;
 	lump.dont_free = nofree;
+}
+
+void WadFile::update_lump_data(int lump_pos)
+{
+	if (!update_mode)
+		return;
+	if (lump_pos < 0 || lump_pos >= (signed)lumps.size())
+		return;
+	wfLump &lump = lumps[lump_pos];
+	if (lump.source_file_pos == 0)
+		return;
+	fseek(source_file, lump.source_file_pos, SEEK_SET);
+	fwrite(lump.data, 1, lump.size, source_file);
 }
 
 void WadFile::drop_lump_data(int lump_pos)

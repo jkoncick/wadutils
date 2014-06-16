@@ -1,5 +1,6 @@
 #include "wad_file.h"
 #include <map>
+#include <getopt.h>
 
 uint32_t compute_hash(uint8_t *data, int size)
 {
@@ -17,29 +18,32 @@ int main (int argc, char *argv[])
 {
 	if (argc < 2)
 	{
-		fprintf(stderr, "You must specify wad filename.\n");
+		printf("Usage: %s [-S] [-s] [-d] [-r] wadfile [wadfile ...]\n", argv[0]);
+		printf("  -S: Do not save resulting wad, just print statistics\n");
+		printf("  -s: Join all sectors with same properties (dangerous)\n");
+		printf("  -d: Do not perform sidedef packing\n");
+		printf("  -r: Erase REJECT lump\n");
 		return 1;
 	}
 
 	// Parse arguments
-	int n = 1;
 	bool arg_dont_save_wad = false;
-	bool arg_dont_join_sectors = false;
+	bool arg_join_sectors = false;
 	bool arg_dont_join_sidedefs = false;
 	bool arg_drop_reject = false;
-	while(n < argc)
+	int c;
+	while ((c = getopt(argc, argv, "Ssdr")) != -1)
 	{
-		if (strcmp(argv[n], "-S") == 0)
+		if (c == 'S')
 			arg_dont_save_wad = true;
-		else if (strcmp(argv[n], "-s") == 0)
-			arg_dont_join_sectors = true;
-		else if (strcmp(argv[n], "-d") == 0)
+		else if (c == 's')
+			arg_join_sectors = true;
+		else if (c == 'd')
 			arg_dont_join_sidedefs = true;
-		else if (strcmp(argv[n], "-r") == 0)
+		else if (c == 'r')
 			arg_drop_reject = true;
 		else
-			break;
-		n++;
+			return 1;
 	}
 
 	// Statistics variables
@@ -51,7 +55,7 @@ int main (int argc, char *argv[])
 	int total_rejected_sectors = 0;
 
 	// Process all wads given on commandline
-	for (; n < argc; n++)
+	for (int n = optind; n < argc; n++)
 	{
 		WadFile wadfile;
 		if (!wadfile.load_wad_file(argv[n]))
@@ -98,7 +102,7 @@ int main (int argc, char *argv[])
 				linedefs_hexen_data = (linedef_hexen_t *)wadfile.get_lump_data(map_lump_pos + ML_LINEDEFS);
 			}
 
-			if (!arg_dont_join_sectors)
+			if (arg_join_sectors)
 			{
 
 			// 1) Process all linedefs and find these whose action special that can affect specific sector(s)
@@ -312,7 +316,7 @@ int main (int argc, char *argv[])
 			// Print statistics
 			printf("Map %-8.8s\n", wadfile.get_lump_name(map_lump_pos));
 			printf("------------\n");
-			if (!arg_dont_join_sectors)
+			if (arg_join_sectors)
 				printf("Joined %4d sectors: %d -> %d (%d%%)\n", sectors_old_num - sectors_new_num,
 						sectors_old_num, sectors_new_num, sectors_new_num * 100 / sectors_old_num);
 			if (!arg_dont_join_sidedefs)

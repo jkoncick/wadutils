@@ -4,7 +4,7 @@ CPPFLAGS=-Wall
 HEADERS=wad_file.h wad_structs.h
 OBJFILES=wad_file.o
 
-all: listlumps texturefinder lumpfinder mapstats mapoptimizer udmf2hexen
+all: listlumps texturefinder lumpfinder replacetextures mapstats mapoptimizer udmf2hexen
 
 listlumps: listlumps.o $(OBJFILES)
 	$(CPP) $(CPPFLAGS) -o $@ $^
@@ -23,6 +23,12 @@ lumpfinder: lumpfinder.o $(OBJFILES)
 
 lumpfinder.o: lumpfinder.cpp $(HEADERS)
 	$(CPP) $(CPPFLAGS) -c -o $@ lumpfinder.cpp
+
+replacetextures: replacetextures.o $(OBJFILES)
+	$(CPP) $(CPPFLAGS) -o $@ $^
+
+replacetextures.o: replacetextures.cpp $(HEADERS)
+	$(CPP) $(CPPFLAGS) -c -o $@ replacetextures.cpp
 
 mapstats: mapstats.o $(OBJFILES)
 	$(CPP) $(CPPFLAGS) -o $@ $^

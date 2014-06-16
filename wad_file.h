@@ -59,15 +59,16 @@ class WadFile
 {
 private:
 	FILE *source_file;
+	bool update_mode;
 	vector<wfLump> lumps;
 	int cursor_pos;
 
 public:
-	WadFile(): source_file(NULL), cursor_pos(-1) {};
+	WadFile(): source_file(NULL), update_mode(false), cursor_pos(-1) {};
 
 	~WadFile();
 
-	bool load_wad_file(const char* filename);
+	bool load_wad_file(const char* filename, bool update = false);
 	bool save_wad_file(const char* filename, bool drop_contents = true);
 
 	bool save_lump_into_file(int lump_pos);
@@ -85,6 +86,7 @@ public:
 	int get_lump_subtype(int lump_pos);
 
 	void replace_lump_data(int lump_pos, char *data, int size, bool nofree);
+	void update_lump_data(int lump_pos);
 	void drop_lump_data(int lump_pos);
 
 	void delete_lump(int lump_pos, bool drop_contents);

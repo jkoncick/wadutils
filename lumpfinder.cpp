@@ -6,7 +6,8 @@ int main (int argc, char *argv[])
 {
 	if (argc < 2)
 	{
-		fprintf(stderr, "You must specify wad filename.\n");
+		printf("Usage: %s wadfile [wadfile ...]\n", argv[0]);
+		printf("  stdin: List of lump names to search, one per line");
 		return 1;
 	}
 	// Load list of lumps to search from stdin
