@@ -1,4 +1,5 @@
 #include "wad_file.h"
+#include <map>
 #include <getopt.h>
 
 // Type of parsed line of TEXTMAP lump
@@ -65,6 +66,52 @@ enum linedef_more_flags
 	LMF_CHECKSWITCHRANGE    = 1 << 6,
 };
 
+struct linedef_special
+{
+	uint8_t special;
+	uint8_t arg1;
+	uint8_t arg2;
+	uint8_t arg3;
+	uint8_t arg4;
+	uint8_t arg5;
+};
+
+// More sector properties not directly settable
+struct sector_more_props
+{
+	int16_t xpanningfloor;
+	int16_t ypanningfloor;
+	int16_t xpanningceiling;
+	int16_t ypanningceiling;
+	float xscalefloor;
+	float yscalefloor;
+	float xscaleceiling;
+	float yscaleceiling;
+	int16_t rotationfloor;
+	int16_t rotationceiling;
+	uint32_t lightcolor;
+	uint32_t fadecolor;
+	uint8_t desaturation;
+	bool gravity_set;
+	float gravity;
+};
+
+linedef_more_props linedefs_mprops[MAX_LINEDEFS];
+linedef_special linedefs_specials[MAX_LINEDEFS];
+sector_more_props sectors_mprops[MAX_SECTORS];
+
+uint32_t compute_hash(uint8_t *data, int size)
+{
+	uint32_t result = 0;
+	for (int i = 0; i < size; i++)
+	{
+		uint32_t val = data[i];
+		val <<= (3 - ((i + (i/4)) & 3)) * 8;
+		result += val;
+	}
+	return result;
+}
+
 TextMapLineType parse_next_line(char *mapdata, bool inside_entity, int *position,
 								char **key, char **str_value, int *int_value, float *float_value)
 {
@@ -122,6 +169,7 @@ TextMapLineType parse_next_line(char *mapdata, bool inside_entity, int *position
 	{
 		// Integer value
 		*int_value = atoi(value);
+		*float_value = *int_value;
 		return VAL_INT;
 	}
 	// Float value. Get integral part and round according to frac part.
@@ -136,6 +184,7 @@ TextMapLineType parse_next_line(char *mapdata, bool inside_entity, int *position
 }
 
 #define SETVAL(entity, str, var) else if (strcmp(key, str) == 0) entity->var = int_val
+#define SETFVAL(entity, str, var) else if (strcmp(key, str) == 0) entity->var = float_val
 #define SETFLAG(entity, str, flag) else if (strcmp(key, str) == 0) entity->flags |= flag
 #define SETSTR(entity, str, var) else if (strcmp(key, str) == 0) strncpy(entity->var, str_val, 8)
 
@@ -198,9 +247,7 @@ bool process_thing(thing_hexen_t *thing, char *key, int int_val)
 	{if (linedef->flags & (7 << 10)) return false; linedef->flags |= flag;}
 #define LSETMFLAG(str, flag) SETFLAG(mprops, str, flag)
 
-linedef_more_props linedefs_mprops[MAX_LINEDEFS];
-
-bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char *key, int int_val)
+bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char *key, int int_val, float float_val)
 {
 	if (false);
 	LSETVAL("v1", beginvertex);
@@ -245,7 +292,7 @@ bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char 
 		mprops->lineid = int_val;
 	else if (strcmp(key, "alpha") == 0)
 	{
-		mprops->alpha = int_val;
+		mprops->alpha = (int)(float_val * 256.0);
 		mprops->alpha_set = true;
 	}
 	else if (strcmp(key, "translucent") == 0)
@@ -268,7 +315,7 @@ bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char 
 #define SIDSETVAL(str, var) SETVAL(sidedef, str, var)
 #define SIDSETSTR(str, var) SETSTR(sidedef, str, var)
 
-bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val)
+bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val, float float_val)
 {
 	if (false);
 	SIDSETVAL("sector", sectornum);
@@ -277,6 +324,48 @@ bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val)
 	SIDSETSTR("texturetop", uppertex);
 	SIDSETSTR("texturemiddle", middletex);
 	SIDSETSTR("texturebottom", lowertex);
+	else if (strcmp(key, "offsetx_bottom") == 0 || strcmp(key, "offsety_bottom") == 0)
+	{
+		if (sidedef->lowertex[0] == '\0')
+			return true;
+		if (sidedef->middletex[0] == '\0' && sidedef->uppertex[0] == '\0')
+		{
+			if (key[6] == 'x')
+				sidedef->xoff += int_val;
+			else
+				sidedef->yoff += int_val;
+			return true;
+		}
+		return false;
+	}
+	else if (strcmp(key, "offsetx_mid") == 0 || strcmp(key, "offsety_mid") == 0)
+	{
+		if (sidedef->middletex[0] == '\0')
+			return true;
+		if (sidedef->lowertex[0] == '\0' && sidedef->uppertex[0] == '\0')
+		{
+			if (key[6] == 'x')
+				sidedef->xoff += int_val;
+			else
+				sidedef->yoff += int_val;
+			return true;
+		}
+		return false;
+	}
+	else if (strcmp(key, "offsetx_top") == 0 || strcmp(key, "offsety_top") == 0)
+	{
+		if (sidedef->uppertex[0] == '\0')
+			return true;
+		if (key[6] == 'x')
+			sidedef->xoff += int_val;
+		else
+			sidedef->yoff += int_val;
+		if (sidedef->lowertex[0] == '\0' && sidedef->middletex[0] == '\0')
+		{
+			return true;
+		}
+		return false;
+	}
 	else
 		return false;
 	return true;
@@ -284,8 +373,10 @@ bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val)
 
 #define SECSETVAL(str, var) SETVAL(sector, str, var)
 #define SECSETSTR(str, var) SETSTR(sector, str, var)
+#define SECSETMVAL(str, var) SETVAL(mprops, str, var)
+#define SECSETMFVAL(str, var) SETFVAL(mprops, str, var)
 
-bool process_sector(sector_t *sector, char *key, char *str_val, int int_val)
+bool process_sector(sector_t *sector, sector_more_props *mprops, char *key, char *str_val, int int_val, float float_val)
 {
 	if (false);
 	SECSETVAL("heightfloor", floorht);
@@ -295,9 +386,40 @@ bool process_sector(sector_t *sector, char *key, char *str_val, int int_val)
 	SECSETVAL("lightlevel", light);
 	SECSETVAL("special", type);
 	SECSETVAL("id", tag);
+	SECSETMVAL("xpanningfloor", xpanningfloor);
+	SECSETMVAL("ypanningfloor", ypanningfloor);
+	SECSETMVAL("xpanningceiling", xpanningceiling);
+	SECSETMVAL("ypanningceiling", ypanningceiling);
+	SECSETMFVAL("xscalefloor", xscalefloor);
+	SECSETMFVAL("yscalefloor", yscalefloor);
+	SECSETMFVAL("xscaleceiling", xscaleceiling);
+	SECSETMFVAL("yscaleceiling", yscaleceiling);
+	SECSETMVAL("rotationfloor", rotationfloor);
+	SECSETMVAL("rotationceiling", rotationceiling);
+	SECSETMVAL("lightcolor", lightcolor);
+	SECSETMVAL("fadecolor", fadecolor);
+	else if (strcmp(key, "desaturation") == 0)
+	{
+		mprops->desaturation = (int)(float_val * 255.0);
+	}
+	else if (strcmp(key, "gravity") == 0)
+	{
+		mprops->gravity_set = true;
+		mprops->gravity = float_val;
+	}
 	else
 		return false;
 	return true;
+}
+
+void copy_line_special(linedef_hexen_t *line, linedef_special *spec)
+{
+	spec->special = line->special;
+	spec->arg1 = line->arg1;
+	spec->arg2 = line->arg2;
+	spec->arg3 = line->arg3;
+	spec->arg4 = line->arg4;
+	spec->arg5 = line->arg5;
 }
 
 int main (int argc, char *argv[])
@@ -356,15 +478,19 @@ int main (int argc, char *argv[])
 			float float_value;
 
 			// Binary map lumps
-			thing_hexen_t *things = (thing_hexen_t *)calloc(MAX_THINGS, sizeof(thing_hexen_t));
-			vertex_t *vertexes = (vertex_t *)calloc(MAX_VERTEXES, sizeof(vertex_t));
+			thing_hexen_t   *things   = (thing_hexen_t *)  calloc(MAX_THINGS,   sizeof(thing_hexen_t));
+			vertex_t        *vertexes = (vertex_t *)       calloc(MAX_VERTEXES, sizeof(vertex_t));
 			linedef_hexen_t *linedefs = (linedef_hexen_t *)calloc(MAX_LINEDEFS, sizeof(linedef_hexen_t));
-			sidedef_t *sidedefs = (sidedef_t *)calloc(MAX_SIDEDEFS, sizeof(sidedef_t));
-			sector_t *sectors = (sector_t *)calloc(MAX_SECTORS, sizeof(sector_t));
+			sidedef_t       *sidedefs = (sidedef_t *)      calloc(MAX_SIDEDEFS, sizeof(sidedef_t));
+			sector_t        *sectors  = (sector_t *)       calloc(MAX_SECTORS,  sizeof(sector_t));
+			// More UDMF properties
 			memset(linedefs_mprops, 0, sizeof(linedef_more_props) * MAX_LINEDEFS);
+			memset(linedefs_specials, 0, sizeof(linedef_special) * MAX_LINEDEFS);
+			memset(sectors_mprops, 0, sizeof(sector_more_props) * MAX_SECTORS);
 
 			// Counters for entities
 			int counters[5] = {0};
+			int side_to_line_num[MAX_SIDEDEFS];
 
 			// Initialize linedefs
 			for (int i = 0; i < MAX_LINEDEFS; i++)
@@ -415,23 +541,36 @@ int main (int argc, char *argv[])
 					case ENT_LINEDEF:
 					{
 						int cur_linedef = counters[ET_LINEDEF];
-						if (strcmp(key, "alpha") == 0)
-							int_value = (int)(float_value * 255.0);
-						resolved = process_linedef(&linedefs[cur_linedef], &linedefs_mprops[cur_linedef], key, int_value);
+						if (strcmp(key, "sidefront") == 0 || strcmp(key, "sideback") == 0)
+							side_to_line_num[int_value] = cur_linedef;
+						resolved = process_linedef(&linedefs[cur_linedef], &linedefs_mprops[cur_linedef], key, int_value, float_value);
 						break;
 					}
 					case ENT_SIDEDEF:
-						resolved = process_sidedef(&sidedefs[counters[ET_SIDEDEF]], key, str_value, int_value);
+					{
+						int cur_sidedef = counters[ET_SIDEDEF];
+						// Do not assign top and bottom textures to one-sided linedefs
+						if (linedefs[side_to_line_num[cur_sidedef]].lsidedef == 65535 &&
+								(strcmp(key, "texturetop") == 0 || strcmp(key, "texturebottom") == 0))
+							continue;
+						resolved = process_sidedef(&sidedefs[cur_sidedef], key, str_value, int_value, float_value);
 						break;
+					}
 					case ENT_SECTOR:
-						resolved = process_sector(&sectors[counters[ET_SECTOR]], key, str_value, int_value);
+					{
+						int cur_sector = counters[ET_SECTOR];
+						resolved = process_sector(&sectors[cur_sector], &sectors_mprops[cur_sector], key, str_value, int_value, float_value);
 						break;
+					}
 					default: ;
 				}
 
 				if (!resolved)
 				{
-					printf("%s %5d: ", entity_type_str[current_entity - ENT_THING], counters[current_entity - ENT_THING]);
+					printf("%s %5d", entity_type_str[current_entity - ENT_THING], counters[current_entity - ENT_THING]);
+					if (current_entity == ENT_SIDEDEF)
+						printf(" (line %5d)", side_to_line_num[counters[ET_SIDEDEF]]);
+					printf(": ");
 					if (line_type == VAL_STRING)
 						printf("%-16s = %s\n", key, str_value);
 					else if (line_type == VAL_BOOL)
@@ -463,9 +602,18 @@ int main (int argc, char *argv[])
 				linedef_hexen_t *line = &linedefs[i];
 				if (mprops->alpha_set)
 				{
+					if (line->special == 208 && line->arg1 == 0)
+					{
+						line->arg1 = mprops->lineid & 255;
+						line->arg4 = mprops->flags;
+						continue;
+					}
 					if (line->special != 0)
+					{
 						printf("Linedef %5d: Special replaced with TranslucentLine: %d (%d, %d, %d, %d, %d)\n", i,
 							   line->special, line->arg1, line->arg2, line->arg3, line->arg4, line->arg5);
+						copy_line_special(line, &linedefs_specials[i]);
+					}
 					line->special = 208;
 					line->arg1 = mprops->lineid & 255;
 					line->arg2 = mprops->alpha;
@@ -484,8 +632,11 @@ int main (int argc, char *argv[])
 						continue;
 					}
 					if (line->special != 0)
-						printf("Linedef %5d: Special replaced with SetLineID: %d (%d, %d, %d, %d, %d)\n", i,
+					{
+						printf("Linedef %5d: Special replaced with SetLineID (%3d, %3d): %d (%d, %d, %d, %d, %d)\n", i, mprops->lineid, mprops->flags,
 							   line->special, line->arg1, line->arg2, line->arg3, line->arg4, line->arg5);
+						copy_line_special(line, &linedefs_specials[i]);
+					}
 					line->special = 121;
 					line->arg1 = mprops->lineid & 255;
 					line->arg2 = mprops->flags;
@@ -493,6 +644,167 @@ int main (int argc, char *argv[])
 					line->arg4 = 0;
 					line->arg5 = mprops->lineid >> 8;
 				}
+			}
+
+			// Now create script lines for setting linedef specials replaced by SetLineId or TranslucentLine
+			int num_linedefs = counters[ET_LINEDEF];
+			// First get the maximum used tag number
+			int max_used_lineid = 0;
+			for (int i = 0; i < num_linedefs; i++)
+			{
+				if (linedefs_mprops[i].lineid > max_used_lineid)
+					max_used_lineid = linedefs_mprops[i].lineid;
+			}
+			// Second find all linedefs with same specials and assign them tags
+			map<uint32_t, int> linedefs_mprops_hash_map;
+			map<int, int> lineid_to_linenum_map;
+			for (int i = 0; i < num_linedefs; i++)
+			{
+				// Check if linedef has any more-properties.
+				linedef_special *lm = &linedefs_specials[i];
+				uint32_t hash = compute_hash((uint8_t *)lm, sizeof(linedef_special));
+				if (hash == 0)
+					continue;
+				int lineid = linedefs_mprops[i].lineid;
+				if (lineid > 0)
+				{
+					// Linedef has nonzero lineid. Must check if different linedefs with same id have same special.
+					map<int, int>::iterator lineid_it = lineid_to_linenum_map.find(lineid);
+					if (lineid_it == lineid_to_linenum_map.end())
+					{
+						lineid_to_linenum_map[lineid] = i;
+						continue;
+					}
+					if (memcmp(lm, &linedefs_specials[lineid_it->second], sizeof(linedef_special)) != 0)
+						printf("Linedef %5d with id %d has different special from linedef %d with same id.\n",
+							   i, lineid, lineid_it->second);
+					continue;
+				}
+				// Linedef has no id. Give it new id.
+				// If any linedef with same special already exists, give current linedef same id.
+				while (1)
+				{
+					// Find the hash in hash table. If collision is found, try next hash.
+					map<uint32_t, int>::iterator hash_it = linedefs_mprops_hash_map.find(hash);
+					if (hash_it == linedefs_mprops_hash_map.end())
+					{
+						// Hash not yet exists, create new id for this linedef
+						linedefs_mprops_hash_map[hash] = i;
+						int new_lineid = ++max_used_lineid;
+						linedefs[i].arg1 = new_lineid;
+						lineid_to_linenum_map[new_lineid] = i;
+						break;
+					}
+					// Hash found, compare both linedef specials
+					if (memcmp(lm, &linedefs_specials[hash_it->second], sizeof(linedef_special)) == 0)
+					{
+						// Specials are same, can assign same id to this linedef
+						linedefs[i].arg1 = linedefs[hash_it->second].arg1;
+						break;
+					}
+					// Properties differ -> hash collision. Use next hash.
+					hash += 13257; // Random value
+				}
+			}
+			// Third create extra script lines to set the specials
+			for (map<int, int>::iterator lineid_it = lineid_to_linenum_map.begin(); lineid_it != lineid_to_linenum_map.end(); lineid_it++)
+			{
+				int lineid = lineid_it->first;
+				linedef_special *spec = &linedefs_specials[lineid_it->second];
+				printf("   SetLineSpecial(%d, %d, %d, %d, %d, %d, %d);\n", lineid,
+					   spec->special, spec->arg1, spec->arg2, spec->arg3, spec->arg4, spec->arg5);
+			}
+
+
+			// Fix sectors with more properties not directly settable
+			int num_sectors = counters[ET_SECTOR];
+			// First get the maximum used tag number
+			int max_used_tag = 0;
+			for (int i = 0; i < num_sectors; i++)
+			{
+				if (sectors[i].tag > max_used_tag)
+					max_used_tag = sectors[i].tag;
+			}
+			// Second find all sectors with same-properties and assign them tags
+			map<uint32_t, int> sectors_mprops_hash_map;
+			map<int, int> tag_to_secnum_map;
+			for (int i = 0; i < num_sectors; i++)
+			{
+				// Check if sector has any more-properties.
+				sector_more_props *sm = &sectors_mprops[i];
+				uint32_t hash = compute_hash((uint8_t *)sm, sizeof(sector_more_props));
+				if (hash == 0)
+					continue;
+				int tag = sectors[i].tag;
+				if (tag > 0)
+				{
+					// Sector has nonzero tag. Must check if different sectors with same tag have same properties.
+					map<int, int>::iterator tag_it = tag_to_secnum_map.find(tag);
+					if (tag_it == tag_to_secnum_map.end())
+					{
+						tag_to_secnum_map[tag] = i;
+						continue;
+					}
+					if (memcmp(sm, &sectors_mprops[tag_it->second], sizeof(sector_more_props)) != 0)
+						printf("Sector %5d with tag %d has different more-props from sector %d with same tag.\n",
+							   i, tag, tag_it->second);
+					continue;
+				}
+				// Sector has zero tag. Give it new tag.
+				// If any sector with same properties already exists, give current sector same tag.
+				while (1)
+				{
+					// Find the hash in hash table. If collision is found, try next hash.
+					map<uint32_t, int>::iterator hash_it = sectors_mprops_hash_map.find(hash);
+					if (hash_it == sectors_mprops_hash_map.end())
+					{
+						// Hash not yet exists, create new tag for this sector
+						sectors_mprops_hash_map[hash] = i;
+						int new_tag = ++max_used_tag;
+						sectors[i].tag = new_tag;
+						tag_to_secnum_map[new_tag] = i;
+						break;
+					}
+					// Hash found, compare both sector more properties
+					if (memcmp(sm, &sectors_mprops[hash_it->second], sizeof(sector_more_props)) == 0)
+					{
+						// Properties are same, can assign same tag to this sector
+						sectors[i].tag = sectors[hash_it->second].tag;
+						break;
+					}
+					// Properties differ -> hash collision. Use next hash.
+					hash += 13257; // Random value
+				}
+			}
+			// Third create extra script lines to set the properties
+			for (map<int, int>::iterator tag_it = tag_to_secnum_map.begin(); tag_it != tag_to_secnum_map.end(); tag_it++)
+			{
+				int tag = tag_it->first;
+				sector_more_props *mprops = &sectors_mprops[tag_it->second];
+				if (mprops->xpanningfloor || mprops->ypanningfloor)
+					printf("   Sector_SetFloorPanning(%d, %d, 0, %d, 0);\n", tag,
+						   mprops->xpanningfloor, mprops->ypanningfloor);
+				if (mprops->xpanningceiling || mprops->ypanningceiling)
+					printf("   Sector_SetCeilingPanning(%d, %d, 0, %d, 0);\n", tag,
+						   mprops->xpanningceiling, mprops->ypanningceiling);
+				if (mprops->xscalefloor || mprops->yscalefloor)
+					printf("   Sector_SetFloorScale2(%d, %.3f, %.3f);\n", tag,
+						   mprops->xscalefloor, mprops->yscalefloor);
+				if (mprops->xscaleceiling || mprops->yscaleceiling)
+					printf("   Sector_SetCeilingScale2(%d, %.3f, %.2f);\n", tag,
+						   mprops->xscaleceiling, mprops->yscaleceiling);
+				if (mprops->rotationfloor || mprops->rotationceiling)
+					printf("   Sector_SetRotation(%d, %d, %d);\n", tag,
+						   mprops->rotationfloor, mprops->rotationceiling);
+				if (mprops->lightcolor || mprops->desaturation)
+					printf("   Sector_SetColor(%d, %d, %d, %d, %d);\n", tag,
+						   mprops->lightcolor >> 16, (mprops->lightcolor >> 8) & 255, mprops->lightcolor & 255, mprops->desaturation);
+				if (mprops->fadecolor)
+					printf("   Sector_SetFade(%d, %d, %d, %d);\n", tag,
+						   mprops->fadecolor >> 16, (mprops->fadecolor >> 8) & 255, mprops->fadecolor & 255);
+				if (mprops->gravity_set)
+					printf("   Sector_SetGravity(%d, %d, %d);\n", tag,
+						   (int)mprops->gravity, (int)((mprops->gravity - (int)mprops->gravity)*100.0 + 0.001));
 			}
 
 			// Save the map into wad
@@ -559,7 +871,7 @@ int main (int argc, char *argv[])
 		{
 			wadfile.save_wad_file("tmp.wad");
 			char cmd[256];
-			sprintf(cmd, "%s -o %s tmp.wad", arg_nodebuilder_path, result_filename.c_str());
+			sprintf(cmd, "%s -o \"%s\" tmp.wad", arg_nodebuilder_path, result_filename.c_str());
 			system(cmd);
 		}
 		else

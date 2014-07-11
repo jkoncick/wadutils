@@ -249,8 +249,14 @@ int main (int argc, char *argv[])
 			int *sidedefs_remapping = new int[sidedefs_old_size];
 			for (int i = 0; i < sidedefs_old_num; i++)
 			{
-				// Check if sidedef with same properties already exists, if yes, perform remapping
 				sidedef_t *s = &sidedefs_old_data[i];
+				// Reset offsets for sidedefs with no textures
+				if (s->lowertex[0] == '-' && s->middletex[0] == '-' && s->uppertex[0] == '-')
+				{
+					s->xoff = 0;
+					s->yoff = 0;
+				}
+				// Check if sidedef with same properties already exists, if yes, perform remapping
 				uint32_t hash = compute_hash((uint8_t *)s, sizeof(sidedef_t));
 				while (1)
 				{
