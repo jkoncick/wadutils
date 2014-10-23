@@ -100,6 +100,10 @@ linedef_more_props linedefs_mprops[MAX_LINEDEFS];
 linedef_special linedefs_specials[MAX_LINEDEFS];
 sector_more_props sectors_mprops[MAX_SECTORS];
 
+// Additional script
+#define DEFAULT_SCRIPT_NUM 337 // Simple solution - use some improbably used script number
+char additional_script[65536];
+
 uint32_t compute_hash(uint8_t *data, int size)
 {
 	uint32_t result = 0;
@@ -326,7 +330,7 @@ bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val, 
 	SIDSETSTR("texturebottom", lowertex);
 	else if (strcmp(key, "offsetx_bottom") == 0 || strcmp(key, "offsety_bottom") == 0)
 	{
-		if (sidedef->lowertex[0] == '\0')
+		if (int_val == 0 || sidedef->lowertex[0] == '\0')
 			return true;
 		if (sidedef->middletex[0] == '\0' && sidedef->uppertex[0] == '\0')
 		{
@@ -340,7 +344,7 @@ bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val, 
 	}
 	else if (strcmp(key, "offsetx_mid") == 0 || strcmp(key, "offsety_mid") == 0)
 	{
-		if (sidedef->middletex[0] == '\0')
+		if (int_val == 0 || sidedef->middletex[0] == '\0')
 			return true;
 		if (sidedef->lowertex[0] == '\0' && sidedef->uppertex[0] == '\0')
 		{
@@ -354,7 +358,7 @@ bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val, 
 	}
 	else if (strcmp(key, "offsetx_top") == 0 || strcmp(key, "offsety_top") == 0)
 	{
-		if (sidedef->uppertex[0] == '\0')
+		if (int_val == 0 || sidedef->uppertex[0] == '\0')
 			return true;
 		if (key[6] == 'x')
 			sidedef->xoff += int_val;
@@ -463,6 +467,8 @@ int main (int argc, char *argv[])
 		{
 			if (wadfile.get_lump_subtype(map_lump_pos) != MF_UDMF)
 				continue;
+			printf("### Converting map %s ###\n", wadfile.get_lump_name(map_lump_pos));
+
 			// Get lump contents
 			char *mapdata = wadfile.get_lump_data(map_lump_pos + 1);
 			int mapdatasize = wadfile.get_lump_size(map_lump_pos + 1);
@@ -487,6 +493,9 @@ int main (int argc, char *argv[])
 			memset(linedefs_mprops, 0, sizeof(linedef_more_props) * MAX_LINEDEFS);
 			memset(linedefs_specials, 0, sizeof(linedef_special) * MAX_LINEDEFS);
 			memset(sectors_mprops, 0, sizeof(sector_more_props) * MAX_SECTORS);
+			// Additional script
+			memset(additional_script, 0, 65536);
+			char *scr = additional_script;
 
 			// Counters for entities
 			int counters[5] = {0};
@@ -567,7 +576,7 @@ int main (int argc, char *argv[])
 
 				if (!resolved)
 				{
-					printf("%s %5d", entity_type_str[current_entity - ENT_THING], counters[current_entity - ENT_THING]);
+					printf("* %s %5d", entity_type_str[current_entity - ENT_THING], counters[current_entity - ENT_THING]);
 					if (current_entity == ENT_SIDEDEF)
 						printf(" (line %5d)", side_to_line_num[counters[ET_SIDEDEF]]);
 					printf(": ");
@@ -595,6 +604,18 @@ int main (int argc, char *argv[])
 				if (sectors[i].ceiltex[0] == '\0') sectors[i].ceiltex[0] = '-';
 			}
 
+			// Fix polyobject things with angle greater than 255
+			for (int i = 0; i < counters[ET_THING]; i++)
+			{
+				thing_hexen_t *thing = &things[i];
+				if (thing->type >= 9300 && thing->type <= 9303 && thing->angle > 255)
+				{
+					if (thing->type == 9300)
+						printf("Polyobject number %d changed to %d\n", thing->angle, thing->angle & 255);
+					thing->angle &= 255;
+				}
+			}
+
 			// Fix linedefs with more properties not directly settable
 			for (int i = 0; i < counters[ET_LINEDEF]; i++)
 			{
@@ -610,8 +631,8 @@ int main (int argc, char *argv[])
 					}
 					if (line->special != 0)
 					{
-						printf("Linedef %5d: Special replaced with TranslucentLine: %d (%d, %d, %d, %d, %d)\n", i,
-							   line->special, line->arg1, line->arg2, line->arg3, line->arg4, line->arg5);
+						/*printf("Linedef %5d: Special replaced with TranslucentLine: %d (%d, %d, %d, %d, %d)\n", i,
+							   line->special, line->arg1, line->arg2, line->arg3, line->arg4, line->arg5);*/
 						copy_line_special(line, &linedefs_specials[i]);
 					}
 					line->special = 208;
@@ -633,8 +654,8 @@ int main (int argc, char *argv[])
 					}
 					if (line->special != 0)
 					{
-						printf("Linedef %5d: Special replaced with SetLineID (%3d, %3d): %d (%d, %d, %d, %d, %d)\n", i, mprops->lineid, mprops->flags,
-							   line->special, line->arg1, line->arg2, line->arg3, line->arg4, line->arg5);
+						/*printf("Linedef %5d: Special replaced with SetLineID (%3d, %3d): %d (%d, %d, %d, %d, %d)\n", i, mprops->lineid, mprops->flags,
+							   line->special, line->arg1, line->arg2, line->arg3, line->arg4, line->arg5);*/
 						copy_line_special(line, &linedefs_specials[i]);
 					}
 					line->special = 121;
@@ -645,6 +666,11 @@ int main (int argc, char *argv[])
 					line->arg5 = mprops->lineid >> 8;
 				}
 			}
+
+			// Create addtional script
+			scr += sprintf(scr, "\n\n// Dummy script automatically added by UDMF2Hexen utility\n"
+						   "script %d OPEN\n{\n", DEFAULT_SCRIPT_NUM);
+			int basescrpos = scr - additional_script;
 
 			// Now create script lines for setting linedef specials replaced by SetLineId or TranslucentLine
 			int num_linedefs = counters[ET_LINEDEF];
@@ -711,7 +737,7 @@ int main (int argc, char *argv[])
 			{
 				int lineid = lineid_it->first;
 				linedef_special *spec = &linedefs_specials[lineid_it->second];
-				printf("   SetLineSpecial(%d, %d, %d, %d, %d, %d, %d);\n", lineid,
+				scr+=sprintf(scr,"   SetLineSpecial(%d, %d, %d, %d, %d, %d, %d);\n", lineid,
 					   spec->special, spec->arg1, spec->arg2, spec->arg3, spec->arg4, spec->arg5);
 			}
 
@@ -782,30 +808,34 @@ int main (int argc, char *argv[])
 				int tag = tag_it->first;
 				sector_more_props *mprops = &sectors_mprops[tag_it->second];
 				if (mprops->xpanningfloor || mprops->ypanningfloor)
-					printf("   Sector_SetFloorPanning(%d, %d, 0, %d, 0);\n", tag,
+					scr+=sprintf(scr,"   Sector_SetFloorPanning(%d, %d, 0, %d, 0);\n", tag,
 						   mprops->xpanningfloor, mprops->ypanningfloor);
 				if (mprops->xpanningceiling || mprops->ypanningceiling)
-					printf("   Sector_SetCeilingPanning(%d, %d, 0, %d, 0);\n", tag,
+					scr+=sprintf(scr,"   Sector_SetCeilingPanning(%d, %d, 0, %d, 0);\n", tag,
 						   mprops->xpanningceiling, mprops->ypanningceiling);
 				if (mprops->xscalefloor || mprops->yscalefloor)
-					printf("   Sector_SetFloorScale2(%d, %.3f, %.3f);\n", tag,
+					scr+=sprintf(scr,"   Sector_SetFloorScale2(%d, %.3f, %.3f);\n", tag,
 						   mprops->xscalefloor, mprops->yscalefloor);
 				if (mprops->xscaleceiling || mprops->yscaleceiling)
-					printf("   Sector_SetCeilingScale2(%d, %.3f, %.2f);\n", tag,
+					scr+=sprintf(scr,"   Sector_SetCeilingScale2(%d, %.3f, %.2f);\n", tag,
 						   mprops->xscaleceiling, mprops->yscaleceiling);
 				if (mprops->rotationfloor || mprops->rotationceiling)
-					printf("   Sector_SetRotation(%d, %d, %d);\n", tag,
+					scr+=sprintf(scr,"   Sector_SetRotation(%d, %d, %d);\n", tag,
 						   mprops->rotationfloor, mprops->rotationceiling);
 				if (mprops->lightcolor || mprops->desaturation)
-					printf("   Sector_SetColor(%d, %d, %d, %d, %d);\n", tag,
+					scr+=sprintf(scr,"   Sector_SetColor(%d, %d, %d, %d, %d);\n", tag,
 						   mprops->lightcolor >> 16, (mprops->lightcolor >> 8) & 255, mprops->lightcolor & 255, mprops->desaturation);
 				if (mprops->fadecolor)
-					printf("   Sector_SetFade(%d, %d, %d, %d);\n", tag,
+					scr+=sprintf(scr,"   Sector_SetFade(%d, %d, %d, %d);\n", tag,
 						   mprops->fadecolor >> 16, (mprops->fadecolor >> 8) & 255, mprops->fadecolor & 255);
 				if (mprops->gravity_set)
-					printf("   Sector_SetGravity(%d, %d, %d);\n", tag,
+					scr+=sprintf(scr,"   Sector_SetGravity(%d, %d, %d);\n", tag,
 						   (int)mprops->gravity, (int)((mprops->gravity - (int)mprops->gravity)*100.0 + 0.001));
 			}
+
+			// Finalize additional script
+			scr += sprintf(scr, "}\n");
+			basescrpos += 2;
 
 			// Save the map into wad
 			const char *map_name = wadfile.get_lump_name(map_lump_pos);
@@ -830,7 +860,25 @@ int main (int argc, char *argv[])
 				{
 					scripts_data = wadfile.get_lump_data(lump_pos);
 					scripts_size = wadfile.get_lump_size(lump_pos);
-					wadfile.delete_lump(lump_pos, false);
+					// Append additional script to SCRIPTS lump
+					int scrpos = scr - additional_script;
+					if (scrpos > basescrpos)
+					{
+						char *new_scripts_data = (char *)malloc(scripts_size + scrpos + 1);
+						memcpy(new_scripts_data, scripts_data, scripts_size);
+						strcat(new_scripts_data, additional_script);
+						scripts_data = new_scripts_data;
+						scripts_size += scrpos;
+						wadfile.delete_lump(lump_pos, true);
+						additional_script[scrpos - 2] = '\0';
+						scr = additional_script + basescrpos - 2;
+						printf("\nAdded an additional dummy script with following contents:\n");
+						printf(scr);
+					}
+					else
+					{
+						wadfile.delete_lump(lump_pos, false);
+					}
 				}
 				else
 					wadfile.delete_lump(lump_pos, true);
