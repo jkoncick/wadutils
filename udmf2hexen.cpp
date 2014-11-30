@@ -39,6 +39,17 @@ const char *entity_type_str[] =
 	"Sector"
 };
 
+enum ProblemType
+{
+	PR_OK,
+	PR_UNTRANSLATED,
+	PR_RANGE,
+	PR_CONFLICT,
+	PR_IGNORE
+};
+
+const char problem_type_str[] = {0, 'U', 'R', 'C', 'I'};
+
 #define MAX_THINGS 4096
 #define MAX_VERTEXES 16384
 #define MAX_LINEDEFS 16384
@@ -55,6 +66,7 @@ struct linedef_more_props
 	bool additive;
 };
 
+// Additional linedef flags not directly settable
 enum linedef_more_flags
 {
 	LMF_ZONEBOUNDARY        = 1 << 0,
@@ -195,7 +207,7 @@ TextMapLineType parse_next_line(char *mapdata, bool inside_entity, int *position
 #define TSETVAL(str, var) SETVAL(thing, str, var)
 #define TSETFLAG(str, flag) SETFLAG(thing, str, flag)
 
-bool process_thing(thing_hexen_t *thing, char *key, int int_val)
+ProblemType process_thing(thing_hexen_t *thing, char *key, int int_val)
 {
 	if (false);
 	TSETVAL("id", tid);
@@ -207,7 +219,7 @@ bool process_thing(thing_hexen_t *thing, char *key, int int_val)
 	else if (strcmp(key, "special") == 0)
 	{
 		thing->special = int_val;
-		return int_val < 256;
+		if (int_val >= 256) return PR_RANGE;
 	}
 	else if (strncmp(key, "arg", 3) == 0)
 	{
@@ -216,7 +228,7 @@ bool process_thing(thing_hexen_t *thing, char *key, int int_val)
 		else if (key[3] == '2') thing->arg3 = int_val;
 		else if (key[3] == '3') thing->arg4 = int_val;
 		else if (key[3] == '4') thing->arg5 = int_val;
-		return int_val < 256;
+		if (int_val >= 256) return PR_RANGE;
 	}
 	else if (strncmp(key, "skill", 5) == 0)
 	{
@@ -241,17 +253,17 @@ bool process_thing(thing_hexen_t *thing, char *key, int int_val)
 	TSETFLAG("standing", THF_STANDSTILL);
 	TSETFLAG("friend", THF_FRIENDLY);
 	else
-		return false;
-	return true;
+		return PR_UNTRANSLATED;
+	return PR_OK;
 }
 
 #define LSETVAL(str, var) SETVAL(linedef, str, var)
 #define LSETFLAG(str, flag) SETFLAG(linedef, str, flag)
 #define LSETACTV(str, flag) else if (strcmp(key, str) == 0) \
-	{if (linedef->flags & (7 << 10)) return false; linedef->flags |= flag;}
+	{if (linedef->flags & (7 << 10)) return PR_CONFLICT; linedef->flags |= flag;}
 #define LSETMFLAG(str, flag) SETFLAG(mprops, str, flag)
 
-bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char *key, int int_val, float float_val)
+ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char *key, char *str_val, int int_val, float float_val)
 {
 	if (false);
 	LSETVAL("v1", beginvertex);
@@ -261,7 +273,7 @@ bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char 
 	else if (strcmp(key, "special") == 0)
 	{
 		linedef->special = int_val;
-		return int_val < 256;
+		if (int_val >= 256) return PR_RANGE;
 	}
 	else if (strncmp(key, "arg", 3) == 0)
 	{
@@ -270,7 +282,7 @@ bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char 
 		else if (key[3] == '2') linedef->arg3 = int_val;
 		else if (key[3] == '3') linedef->arg4 = int_val;
 		else if (key[3] == '4') linedef->arg5 = int_val;
-		return int_val < 256;
+		if (int_val >= 256) return PR_RANGE;
 	}
 	LSETFLAG("blocking", LHF_BLOCKING);
 	LSETFLAG("blockmonsters", LHF_BLOCKMONSTERS);
@@ -291,7 +303,7 @@ bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char 
 	LSETACTV("impact", LHF_SPAC_Impact)
 	LSETACTV("playerpush", LHF_SPAC_Push)
 	LSETACTV("missilecross", LHF_SPAC_PCross)
-	LSETACTV("passuse", LHF_SPAC_UseThrough)
+	//LSETACTV("passuse", LHF_SPAC_UseThrough)
 	else if (strcmp(key, "id") == 0)
 		mprops->lineid = int_val;
 	else if (strcmp(key, "alpha") == 0)
@@ -304,6 +316,8 @@ bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char 
 		mprops->alpha = 192;
 		mprops->alpha_set = true;
 	}
+	else if (strcmp(key, "renderstyle") == 0 && strcmp(str_val, "add") == 0)
+		mprops->additive = true;
 	LSETMFLAG("zoneboundary", LMF_ZONEBOUNDARY);
 	LSETMFLAG("jumpover", LMF_RAILING);
 	LSETMFLAG("blockfloating", LMF_BLOCK_FLOATERS);
@@ -312,14 +326,14 @@ bool process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops, char 
 	LSETMFLAG("midtex3d", LMF_3DMIDTEX);
 	LSETMFLAG("checkswitchrange", LMF_CHECKSWITCHRANGE);
 	else
-		return false;
-	return true;
+		return PR_UNTRANSLATED;
+	return PR_OK;
 }
 
 #define SIDSETVAL(str, var) SETVAL(sidedef, str, var)
 #define SIDSETSTR(str, var) SETSTR(sidedef, str, var)
 
-bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val, float float_val)
+ProblemType process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val, float float_val)
 {
 	if (false);
 	SIDSETVAL("sector", sectornum);
@@ -330,49 +344,54 @@ bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val, 
 	SIDSETSTR("texturebottom", lowertex);
 	else if (strcmp(key, "offsetx_bottom") == 0 || strcmp(key, "offsety_bottom") == 0)
 	{
+		// If offset is zero we can simply skip it.
+		// If offset is nonzero but no texture is set, we can skip it too.
 		if (int_val == 0 || sidedef->lowertex[0] == '\0')
-			return true;
+			return PR_OK;
+		// If there is no middle and no upper texture, we can add its offset to general offset.
 		if (sidedef->middletex[0] == '\0' && sidedef->uppertex[0] == '\0')
 		{
 			if (key[6] == 'x')
 				sidedef->xoff += int_val;
 			else
 				sidedef->yoff += int_val;
-			return true;
+			return PR_OK;
 		}
-		return false;
+		// Otherwise there is a problem. However we don't process the offsets further.
+		return PR_IGNORE;
 	}
 	else if (strcmp(key, "offsetx_mid") == 0 || strcmp(key, "offsety_mid") == 0)
 	{
 		if (int_val == 0 || sidedef->middletex[0] == '\0')
-			return true;
+			return PR_OK;
 		if (sidedef->lowertex[0] == '\0' && sidedef->uppertex[0] == '\0')
 		{
 			if (key[6] == 'x')
 				sidedef->xoff += int_val;
 			else
 				sidedef->yoff += int_val;
-			return true;
+			return PR_OK;
 		}
-		return false;
+		return PR_IGNORE;
 	}
 	else if (strcmp(key, "offsetx_top") == 0 || strcmp(key, "offsety_top") == 0)
 	{
 		if (int_val == 0 || sidedef->uppertex[0] == '\0')
-			return true;
+			return PR_OK;
+		// We always add offset of top texture to general offset. It gives better experimantal results.
 		if (key[6] == 'x')
 			sidedef->xoff += int_val;
 		else
 			sidedef->yoff += int_val;
 		if (sidedef->lowertex[0] == '\0' && sidedef->middletex[0] == '\0')
 		{
-			return true;
+			return PR_OK;
 		}
-		return false;
+		return PR_IGNORE;
 	}
 	else
-		return false;
-	return true;
+		return PR_UNTRANSLATED;
+	return PR_OK;
 }
 
 #define SECSETVAL(str, var) SETVAL(sector, str, var)
@@ -380,7 +399,7 @@ bool process_sidedef(sidedef_t *sidedef, char *key, char *str_val, int int_val, 
 #define SECSETMVAL(str, var) SETVAL(mprops, str, var)
 #define SECSETMFVAL(str, var) SETFVAL(mprops, str, var)
 
-bool process_sector(sector_t *sector, sector_more_props *mprops, char *key, char *str_val, int int_val, float float_val)
+ProblemType process_sector(sector_t *sector, sector_more_props *mprops, char *key, char *str_val, int int_val, float float_val)
 {
 	if (false);
 	SECSETVAL("heightfloor", floorht);
@@ -412,8 +431,8 @@ bool process_sector(sector_t *sector, sector_more_props *mprops, char *key, char
 		mprops->gravity = float_val;
 	}
 	else
-		return false;
-	return true;
+		return PR_UNTRANSLATED;
+	return PR_OK;
 }
 
 void copy_line_special(linedef_hexen_t *line, linedef_special *spec)
@@ -430,26 +449,46 @@ int main (int argc, char *argv[])
 {
 	if (argc < 2)
 	{
-		printf("Usage: %s [-S] [-n] [-N nodebuilder] wadfile\n", argv[0]);
-		printf("  -S: Do not save resulting wad, just print statistics\n");
-		printf("  -n: Build nodes (runs zdbsp.exe or specified nodebuilder)\n");
-		printf("  -N: Specify path to nodebuilder\n");
+		printf("Usage: %s [-S] [-n [-N path]] [-a [-A path]] [-s num] [-i] wadfile\n", argv[0]);
+		printf("  -S: Do not save resulting wad, just print conversion log\n");
+		printf("  -n: Rebuild nodes. Specify nodebuilder path with -N\n");
+		printf("      or NODEBUILDER_PATH variable, default is \"zdbsp.exe\"\n");
+		printf("  -a: Recompile scripts if needed. Specify ACS compiler path with -A\n");
+		printf("      or ACC_PATH variable, default is \"acc.exe\"\n");
+		printf("  -s: Specify number of dummy OPEN script, default is 337\n");
+		printf("  -i: Suppress logging of \"Ignore\" problems\n");
 		return 1;
 	}
 
 	// Parse arguments
 	bool arg_dont_save_wad = false;
 	bool arg_build_nodes = false;
-	char *arg_nodebuilder_path = (char *)"zdbsp.exe";
+	bool arg_compile_scripts = false;
+	bool arg_no_logging_ignore = false;
+	int arg_script_number = DEFAULT_SCRIPT_NUM;
+	char *arg_nodebuilder_path = getenv("NODEBUILDER_PATH");
+	if (arg_nodebuilder_path == NULL)
+		arg_nodebuilder_path = (char *)"zdbsp.exe";
+	char *arg_acc_path = getenv("ACC_PATH");
+	if (arg_acc_path == NULL)
+		arg_acc_path = (char *)"acc.exe";
 	int c;
-	while ((c = getopt(argc, argv, "SnN:")) != -1)
+	while ((c = getopt(argc, argv, "Snas:N:A:i")) != -1)
 	{
 		if (c == 'S')
 			arg_dont_save_wad = true;
 		else if (c == 'n')
 			arg_build_nodes = true;
+		else if (c == 'a')
+			arg_compile_scripts = true;
+		else if (c == 's')
+			arg_script_number = atoi(optarg);
 		else if (c == 'N')
 			arg_nodebuilder_path = optarg;
+		else if (c == 'A')
+			arg_acc_path = optarg;
+		else if (c == 'i')
+			arg_no_logging_ignore = true;
 		else
 			return 1;
 	}
@@ -498,7 +537,12 @@ int main (int argc, char *argv[])
 			char *scr = additional_script;
 
 			// Counters for entities
-			int counters[5] = {0};
+			int num_things = 0;
+			int num_vertexes = 0;
+			int num_linedefs = 0;
+			int num_sidedefs = 0;
+			int num_sectors = 0;
+			int *counters[5] = {&num_things, &num_vertexes, &num_linedefs, &num_sidedefs, &num_sectors};
 			int side_to_line_num[MAX_SIDEDEFS];
 
 			// Initialize linedefs
@@ -525,60 +569,62 @@ int main (int argc, char *argv[])
 				else if (line_type == LN_END)
 				{
 					inside_entity = false;
-					counters[current_entity - ENT_THING]++;
+					(*counters[current_entity - ENT_THING])++;
 				}
 				if (!inside_entity)
 					continue;
 
 				// Now process the value
-				bool resolved = true;
+				ProblemType problem = PR_OK;
 				switch (current_entity)
 				{
 					case ENT_THING:
-						resolved = process_thing(&things[counters[ET_THING]], key, int_value);
+						problem = process_thing(&things[num_things], key, int_value);
 						break;
 					case ENT_VERTEX:
 					{
 						if (key[0] == 'x')
-							vertexes[counters[ET_VERTEX]].xpos = int_value;
+							vertexes[num_vertexes].xpos = int_value;
 						else if (key[0] == 'y')
-							vertexes[counters[ET_VERTEX]].ypos = int_value;
+							vertexes[num_vertexes].ypos = int_value;
 						else
-							resolved = false;
+							problem = PR_UNTRANSLATED;
 						break;
 					}
 					case ENT_LINEDEF:
 					{
-						int cur_linedef = counters[ET_LINEDEF];
+						int cur_linedef = num_linedefs;
 						if (strcmp(key, "sidefront") == 0 || strcmp(key, "sideback") == 0)
 							side_to_line_num[int_value] = cur_linedef;
-						resolved = process_linedef(&linedefs[cur_linedef], &linedefs_mprops[cur_linedef], key, int_value, float_value);
+						problem = process_linedef(&linedefs[cur_linedef], &linedefs_mprops[cur_linedef], key, str_value, int_value, float_value);
 						break;
 					}
 					case ENT_SIDEDEF:
 					{
-						int cur_sidedef = counters[ET_SIDEDEF];
+						int cur_sidedef = num_sidedefs;
 						// Do not assign top and bottom textures to one-sided linedefs
 						if (linedefs[side_to_line_num[cur_sidedef]].lsidedef == 65535 &&
 								(strcmp(key, "texturetop") == 0 || strcmp(key, "texturebottom") == 0))
 							continue;
-						resolved = process_sidedef(&sidedefs[cur_sidedef], key, str_value, int_value, float_value);
+						problem = process_sidedef(&sidedefs[cur_sidedef], key, str_value, int_value, float_value);
 						break;
 					}
 					case ENT_SECTOR:
 					{
-						int cur_sector = counters[ET_SECTOR];
-						resolved = process_sector(&sectors[cur_sector], &sectors_mprops[cur_sector], key, str_value, int_value, float_value);
+						int cur_sector = num_sectors;
+						problem = process_sector(&sectors[cur_sector], &sectors_mprops[cur_sector], key, str_value, int_value, float_value);
 						break;
 					}
 					default: ;
 				}
 
-				if (!resolved)
+				if (problem != PR_OK)
 				{
-					printf("* %s %5d", entity_type_str[current_entity - ENT_THING], counters[current_entity - ENT_THING]);
+					if (problem == PR_IGNORE && arg_no_logging_ignore)
+						continue;
+					printf("%c %s %5d", problem_type_str[problem], entity_type_str[current_entity - ENT_THING], *counters[current_entity - ENT_THING]);
 					if (current_entity == ENT_SIDEDEF)
-						printf(" (line %5d)", side_to_line_num[counters[ET_SIDEDEF]]);
+						printf(" (line %5d)", side_to_line_num[num_sidedefs]);
 					printf(": ");
 					if (line_type == VAL_STRING)
 						printf("%-16s = %s\n", key, str_value);
@@ -592,32 +638,32 @@ int main (int argc, char *argv[])
 			}
 
 			// Fix empty texture names
-			for (int i = 0; i < counters[ET_SIDEDEF]; i++)
+			for (int i = 0; i < num_sidedefs; i++)
 			{
 				if (sidedefs[i].uppertex[0] == '\0') sidedefs[i].uppertex[0] = '-';
 				if (sidedefs[i].lowertex[0] == '\0') sidedefs[i].lowertex[0] = '-';
 				if (sidedefs[i].middletex[0] == '\0') sidedefs[i].middletex[0] = '-';
 			}
-			for (int i = 0; i < counters[ET_SECTOR]; i++)
+			for (int i = 0; i < num_sectors; i++)
 			{
 				if (sectors[i].floortex[0] == '\0') sectors[i].floortex[0] = '-';
 				if (sectors[i].ceiltex[0] == '\0') sectors[i].ceiltex[0] = '-';
 			}
 
 			// Fix polyobject things with angle greater than 255
-			for (int i = 0; i < counters[ET_THING]; i++)
+			for (int i = 0; i < num_things; i++)
 			{
 				thing_hexen_t *thing = &things[i];
 				if (thing->type >= 9300 && thing->type <= 9303 && thing->angle > 255)
 				{
 					if (thing->type == 9300)
-						printf("Polyobject number %d changed to %d\n", thing->angle, thing->angle & 255);
+						printf("R Polyobject number %d trunctated to %d\n", thing->angle, thing->angle & 255);
 					thing->angle &= 255;
 				}
 			}
 
 			// Fix linedefs with more properties not directly settable
-			for (int i = 0; i < counters[ET_LINEDEF]; i++)
+			for (int i = 0; i < num_linedefs; i++)
 			{
 				linedef_more_props *mprops = &linedefs_mprops[i];
 				linedef_hexen_t *line = &linedefs[i];
@@ -669,11 +715,10 @@ int main (int argc, char *argv[])
 
 			// Create addtional script
 			scr += sprintf(scr, "\n\n// Dummy script automatically added by UDMF2Hexen utility\n"
-						   "script %d OPEN\n{\n", DEFAULT_SCRIPT_NUM);
+						   "script %d OPEN\n{\n", arg_script_number);
 			int basescrpos = scr - additional_script;
 
 			// Now create script lines for setting linedef specials replaced by SetLineId or TranslucentLine
-			int num_linedefs = counters[ET_LINEDEF];
 			// First get the maximum used tag number
 			int max_used_lineid = 0;
 			for (int i = 0; i < num_linedefs; i++)
@@ -702,8 +747,8 @@ int main (int argc, char *argv[])
 						continue;
 					}
 					if (memcmp(lm, &linedefs_specials[lineid_it->second], sizeof(linedef_special)) != 0)
-						printf("Linedef %5d with id %d has different special from linedef %d with same id.\n",
-							   i, lineid, lineid_it->second);
+						printf("C Linedefs %5d and %5d have same ID (%d) but different special.\n",
+							   i, lineid_it->second, lineid);
 					continue;
 				}
 				// Linedef has no id. Give it new id.
@@ -743,7 +788,6 @@ int main (int argc, char *argv[])
 
 
 			// Fix sectors with more properties not directly settable
-			int num_sectors = counters[ET_SECTOR];
 			// First get the maximum used tag number
 			int max_used_tag = 0;
 			for (int i = 0; i < num_sectors; i++)
@@ -772,8 +816,8 @@ int main (int argc, char *argv[])
 						continue;
 					}
 					if (memcmp(sm, &sectors_mprops[tag_it->second], sizeof(sector_more_props)) != 0)
-						printf("Sector %5d with tag %d has different more-props from sector %d with same tag.\n",
-							   i, tag, tag_it->second);
+						printf("C Sectors %5d and %5d have same tag (%d) but different properties.\n",
+							   i, tag_it->second, tag);
 					continue;
 				}
 				// Sector has zero tag. Give it new tag.
@@ -887,21 +931,40 @@ int main (int argc, char *argv[])
 
 			// Append all Hexen format map lumps
 			wadfile.append_lump(map_name, 0, NULL, LT_MAP_HEADER, MF_HEXEN, false);
-			int things_size = counters[ET_THING] * sizeof(thing_hexen_t);
+			int things_size = num_things * sizeof(thing_hexen_t);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_THINGS], things_size, (char *)things, 0, 0, false);
-			int linedefs_size = counters[ET_LINEDEF] * sizeof(linedef_hexen_t);
+			int linedefs_size = num_linedefs * sizeof(linedef_hexen_t);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_LINEDEFS], linedefs_size, (char *)linedefs, 0, 0, false);
-			int sidedefs_size = counters[ET_SIDEDEF] * sizeof(sidedef_t);
+			int sidedefs_size = num_sidedefs * sizeof(sidedef_t);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SIDEDEFS], sidedefs_size, (char *)sidedefs, 0, 0, false);
-			int vertexes_size = counters[ET_VERTEX] * sizeof(vertex_t);
+			int vertexes_size = num_vertexes * sizeof(vertex_t);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_VERTEXES], vertexes_size, (char *)vertexes, 0, 0, false);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SEGS], 0, NULL, 0, 0, false);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SSECTORS], 0, NULL, 0, 0, false);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_NODES], 0, NULL, 0, 0, false);
-			int sectors_size = counters[ET_SECTOR] * sizeof(sector_t);
+			int sectors_size = num_sectors * sizeof(sector_t);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SECTORS], sectors_size, (char *)sectors, 0, 0, false);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_REJECT], 0, NULL, 0, 0, false);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_BLOCKMAP], 0, NULL, 0, 0, false);
+			if (arg_compile_scripts)
+			{
+				FILE *tmpacs = fopen("tmp.acs", "w");
+				fwrite(scripts_data, 1, scripts_size, tmpacs);
+				fclose(tmpacs);
+				char cmd[256];
+				sprintf(cmd, "%s tmp.acs tmp.o > acc_output.txt 2>&1", arg_acc_path);
+				system(cmd);
+				tmpacs = fopen("tmp.o", "r");
+				fseek(tmpacs, 0, SEEK_END);
+				behavior_size = ftell(tmpacs);
+				fseek(tmpacs, 0, SEEK_SET);
+				free(behavior_data);
+				behavior_data = (char *)malloc(behavior_size);
+				fread(behavior_data, 1, behavior_size, tmpacs);
+				fclose(tmpacs);
+				unlink("tmp.acs");
+				unlink("tmp.o");
+			}
 			wadfile.append_lump(wfMapLumpTypeStr[ML_BEHAVIOR], behavior_size, behavior_data, 0, 0, true);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SCRIPTS], scripts_size, scripts_data, 0, 0, true);
 		}
@@ -919,7 +982,7 @@ int main (int argc, char *argv[])
 		{
 			wadfile.save_wad_file("tmp.wad");
 			char cmd[256];
-			sprintf(cmd, "%s -o \"%s\" tmp.wad", arg_nodebuilder_path, result_filename.c_str());
+			sprintf(cmd, "%s -o \"%s\" tmp.wad > zdbsp_out.txt", arg_nodebuilder_path, result_filename.c_str());
 			system(cmd);
 		}
 		else
