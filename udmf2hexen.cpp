@@ -277,6 +277,8 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props *mprops
 	}
 	else if (strncmp(key, "arg", 3) == 0)
 	{
+		if (linedef->special == 160 && key[3] == '3' && int_val > 255)
+			int_val = 255; // Fix 3D floor definitions which have alpha more than 255
 		if (key[3] == '0') linedef->arg1 = int_val;
 		else if (key[3] == '1') linedef->arg2 = int_val;
 		else if (key[3] == '2') linedef->arg3 = int_val;
@@ -445,18 +447,23 @@ void copy_line_special(linedef_hexen_t *line, linedef_special *spec)
 	spec->arg5 = line->arg5;
 }
 
+void print_help(const char* prog)
+{
+	printf("Usage: %s [-S] [-n [-N path]] [-c [-A path]] [-s num] [-i] wadfile\n", prog);
+	printf("  -S: Do not save resulting wad, just print conversion log\n");
+	printf("  -n: Rebuild nodes. Specify nodebuilder path with -N\n");
+	printf("      or NODEBUILDER_PATH variable, default is \"zdbsp.exe\"\n");
+	printf("  -c: Recompile scripts if needed. Specify ACS compiler path with -A\n");
+	printf("      or ACC_PATH variable, default is \"acc.exe\"\n");
+	printf("  -s: Specify number of dummy OPEN script, default is 337\n");
+	printf("  -i: Suppress logging of \"I\" problems\n");
+}
+
 int main (int argc, char *argv[])
 {
 	if (argc < 2)
 	{
-		printf("Usage: %s [-S] [-n [-N path]] [-a [-A path]] [-s num] [-i] wadfile\n", argv[0]);
-		printf("  -S: Do not save resulting wad, just print conversion log\n");
-		printf("  -n: Rebuild nodes. Specify nodebuilder path with -N\n");
-		printf("      or NODEBUILDER_PATH variable, default is \"zdbsp.exe\"\n");
-		printf("  -a: Recompile scripts if needed. Specify ACS compiler path with -A\n");
-		printf("      or ACC_PATH variable, default is \"acc.exe\"\n");
-		printf("  -s: Specify number of dummy OPEN script, default is 337\n");
-		printf("  -i: Suppress logging of \"Ignore\" problems\n");
+		print_help(argv[0]);
 		return 1;
 	}
 
@@ -473,13 +480,13 @@ int main (int argc, char *argv[])
 	if (arg_acc_path == NULL)
 		arg_acc_path = (char *)"acc.exe";
 	int c;
-	while ((c = getopt(argc, argv, "Snas:N:A:i")) != -1)
+	while ((c = getopt(argc, argv, "Sncs:N:A:ih")) != -1)
 	{
 		if (c == 'S')
 			arg_dont_save_wad = true;
 		else if (c == 'n')
 			arg_build_nodes = true;
-		else if (c == 'a')
+		else if (c == 'c')
 			arg_compile_scripts = true;
 		else if (c == 's')
 			arg_script_number = atoi(optarg);
@@ -489,8 +496,38 @@ int main (int argc, char *argv[])
 			arg_acc_path = optarg;
 		else if (c == 'i')
 			arg_no_logging_ignore = true;
+		else if (c == 'h')
+		{
+			print_help(argv[0]);
+			return 0;
+		}
 		else
 			return 1;
+	}
+
+	// Check if given nodebuilder and acc paths are correct
+	if (arg_build_nodes)
+	{
+		FILE *f = fopen(arg_nodebuilder_path, "r");
+		if (f == NULL)
+		{
+			fprintf(stderr, "Warning: Path \"%s\" does not specify existing nodebuilder executable.\n", arg_nodebuilder_path);
+			arg_build_nodes = false;
+		}
+		else
+			fclose(f);
+	}
+
+	if (arg_compile_scripts)
+	{
+		FILE *f = fopen(arg_acc_path, "r");
+		if (f == NULL)
+		{
+			fprintf(stderr, "Warning: Path \"%s\" does not specify existing acc executable.\n", arg_acc_path);
+			arg_compile_scripts = false;
+		}
+		else
+			fclose(f);
 	}
 
 	// Process all wads given on commandline
@@ -782,7 +819,22 @@ int main (int argc, char *argv[])
 			{
 				int lineid = lineid_it->first;
 				linedef_special *spec = &linedefs_specials[lineid_it->second];
-				scr+=sprintf(scr,"   SetLineSpecial(%d, %d, %d, %d, %d, %d, %d);\n", lineid,
+				// Handle static-init specials (like texture scrolling) in individual ways
+				if (spec->special == 100) // Scroll_Texture_Left
+					scr+=sprintf(scr,"   Scroll_Wall(%d, %.3f, 0, 0, %d);\n", lineid,
+					   spec->arg1 / 64.0, spec->arg2?spec->arg2:7);
+				else if (spec->special == 101) // Scroll_Texture_Right
+					scr+=sprintf(scr,"   Scroll_Wall(%d, %.3f, 0, 0, %d);\n", lineid,
+					   spec->arg1 / -64.0, spec->arg2?spec->arg2:7);
+				else if (spec->special == 102) // Scroll_Texture_Up
+					scr+=sprintf(scr,"   Scroll_Wall(%d, 0, %.3f, 0, %d);\n", lineid,
+					   spec->arg1 / 64.0, spec->arg2?spec->arg2:7);
+				else if (spec->special == 103) // Scroll_Texture_Down
+					scr+=sprintf(scr,"   Scroll_Wall(%d, 0, %.3f, 0, %d);\n", lineid,
+					   spec->arg1 / -64.0, spec->arg2?spec->arg2:7);
+				// For all normal specials use SetLineSpecial
+				else
+					scr+=sprintf(scr,"   SetLineSpecial(%d, %d, %d, %d, %d, %d, %d);\n", lineid,
 					   spec->special, spec->arg1, spec->arg2, spec->arg3, spec->arg4, spec->arg5);
 			}
 
@@ -859,10 +911,10 @@ int main (int argc, char *argv[])
 						   mprops->xpanningceiling, mprops->ypanningceiling);
 				if (mprops->xscalefloor || mprops->yscalefloor)
 					scr+=sprintf(scr,"   Sector_SetFloorScale2(%d, %.3f, %.3f);\n", tag,
-						   mprops->xscalefloor, mprops->yscalefloor);
+						   mprops->xscalefloor?1/mprops->xscalefloor:1.0, mprops->yscalefloor?1/mprops->yscalefloor:1.0);
 				if (mprops->xscaleceiling || mprops->yscaleceiling)
-					scr+=sprintf(scr,"   Sector_SetCeilingScale2(%d, %.3f, %.2f);\n", tag,
-						   mprops->xscaleceiling, mprops->yscaleceiling);
+					scr+=sprintf(scr,"   Sector_SetCeilingScale2(%d, %.3f, %.3f);\n", tag,
+						   mprops->xscaleceiling?1/mprops->xscaleceiling:1.0, mprops->yscaleceiling?1/mprops->yscaleceiling:1.0);
 				if (mprops->rotationfloor || mprops->rotationceiling)
 					scr+=sprintf(scr,"   Sector_SetRotation(%d, %d, %d);\n", tag,
 						   mprops->rotationfloor, mprops->rotationceiling);
@@ -887,6 +939,7 @@ int main (int argc, char *argv[])
 
 			// Delete all UDMF map lumps and save BEHAVIOR and SCRIPTS lumps
 			int lump_pos = map_lump_pos + 1;
+			int behavior_lump_pos = 0;
 			char *behavior_data = NULL;
 			int behavior_size = 0;
 			char *scripts_data = NULL;
@@ -899,6 +952,7 @@ int main (int argc, char *argv[])
 					behavior_data = wadfile.get_lump_data(lump_pos);
 					behavior_size = wadfile.get_lump_size(lump_pos);
 					wadfile.delete_lump(lump_pos, false);
+					behavior_lump_pos = lump_pos;
 				}
 				else if (strcmp(lump_name, "SCRIPTS") == 0)
 				{
@@ -952,18 +1006,25 @@ int main (int argc, char *argv[])
 				fwrite(scripts_data, 1, scripts_size, tmpacs);
 				fclose(tmpacs);
 				char cmd[256];
-				sprintf(cmd, "%s tmp.acs tmp.o > acc_output.txt 2>&1", arg_acc_path);
+				sprintf(cmd, "\"%s\" tmp.acs tmp.o > acc_output.txt 2>&1", arg_acc_path);
 				system(cmd);
-				tmpacs = fopen("tmp.o", "r");
-				fseek(tmpacs, 0, SEEK_END);
-				behavior_size = ftell(tmpacs);
-				fseek(tmpacs, 0, SEEK_SET);
-				free(behavior_data);
-				behavior_data = (char *)malloc(behavior_size);
-				fread(behavior_data, 1, behavior_size, tmpacs);
-				fclose(tmpacs);
-				unlink("tmp.acs");
-				unlink("tmp.o");
+				tmpacs = fopen("tmp.o", "rb");
+				if (tmpacs == NULL)
+				{
+					fprintf(stderr, "Warning: Could not load compiled scripts. Compilation probably failed, check compiler log.\n");
+				}
+				else
+				{
+					fseek(tmpacs, 0, SEEK_END);
+					behavior_size = ftell(tmpacs);
+					fseek(tmpacs, 0, SEEK_SET);
+					wadfile.drop_lump_data(behavior_lump_pos);
+					behavior_data = (char *)malloc(behavior_size);
+					fread(behavior_data, 1, behavior_size, tmpacs);
+					fclose(tmpacs);
+					unlink("tmp.acs");
+					unlink("tmp.o");
+				}
 			}
 			wadfile.append_lump(wfMapLumpTypeStr[ML_BEHAVIOR], behavior_size, behavior_data, 0, 0, true);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SCRIPTS], scripts_size, scripts_data, 0, 0, true);
@@ -992,5 +1053,3 @@ int main (int argc, char *argv[])
 	}
 	return 0;
 }
-
-
