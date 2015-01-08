@@ -27,41 +27,41 @@ enum TextMapLineType
 	VAL_STRING
 };
 
-// Map entity types
-enum EntityType
-{
-	ET_THING,
-	ET_VERTEX,
-	ET_LINEDEF,
-	ET_SIDEDEF,
-	ET_SECTOR
-};
-
-const char *entity_type_str[] =
-{
-	"Thing",
-	"Vertex",
-	"Linedef",
-	"Sidedef",
-	"Sector"
-};
-
 enum ProblemType
 {
-	PR_OK,
-	PR_UNTRANSLATED,
-	PR_RANGE,
-	PR_CONFLICT,
-	PR_IGNORE
+	PR_OK = 0,
+	PR_UNTRANSLATED = 'U',
+	PR_RANGE = 'R',
+	PR_CONFLICT = 'C',
+	PR_FLOATING = 'F',
+	PR_IGNORE = 'I',
+	PR_ERROR = 'E'
 };
-
-const char problem_type_str[] = {0, 'U', 'R', 'C', 'I'};
 
 enum LineSide
 {
 	SIDE_FRONT = 0,
 	SIDE_BACK = 1
 };
+
+enum IgnorePropertyType
+{
+	IGN_HORIZONTAL_OFFSET = 1,
+	IGN_VERTICAL_OFFSET = 2,
+	IGN_PANNING = 4,
+	IGN_SCALE = 8,
+	IGN_ROTATION = 16,
+	IGN_LIGHT = 32
+};
+
+struct TextureProperties
+{
+	int width;
+	int height;
+	int ignore_flags;
+};
+
+typedef map<string, TextureProperties> TexturePropertiesMap;
 
 enum TransferType
 {
@@ -109,6 +109,7 @@ enum linedef_more_flags
 	LMF_WRAP_MIDTEX         = 1 << 4,
 	LMF_3DMIDTEX            = 1 << 5,
 	LMF_CHECKSWITCHRANGE    = 1 << 6,
+	LMF_FIRSTSIDEONLY       = 1 << 7
 };
 
 // More linedef properties which can be directly set with some dummy special (like Line_SetIdentification)
@@ -160,6 +161,7 @@ struct sidedef_more_props
 // More sector properties not directly settable
 struct sector_more_props
 {
+	uint16_t original_tag;
 	int16_t xpanningfloor;
 	int16_t ypanningfloor;
 	int16_t xpanningceiling;
@@ -170,13 +172,15 @@ struct sector_more_props
 	float yscaleceiling;
 	int16_t rotationfloor;
 	int16_t rotationceiling;
+	int16_t lightfloor;
+	int16_t lightceiling;
+	bool lightfloorabsolute;
+	bool lightceilingabsolute;
+	bool gravity_set;
+	float gravity;
 	uint32_t lightcolor;
 	uint32_t fadecolor;
 	uint8_t desaturation;
-	bool gravity_set;
-	float gravity;
-	int16_t lightfloor;
-	int16_t lightceiling;
 };
 
 // *********************************************************** //
@@ -246,8 +250,14 @@ TextMapLineType parse_next_line(char *mapdata, bool inside_entity, int *position
 	*float_value = atof(value);
 	*frac = '\0';
 	int int_part = atoi(value);
+	// Round integral part according to fractional part
 	if (frac[1] >= '5')
-		int_part++;
+	{
+		if (value[0] == '-')
+			int_part--;
+		else
+			int_part++;
+	}
 	*int_value = int_part;
 	int frac_part = atoi(frac + 1);
 	return frac_part?VAL_FLOAT:VAL_INT;
@@ -256,6 +266,9 @@ TextMapLineType parse_next_line(char *mapdata, bool inside_entity, int *position
 // *********************************************************** //
 // Functions and macros for converting map entity properties   //
 // *********************************************************** //
+#define P_START if (false);
+#define P_END   else return PR_UNTRANSLATED; return PR_OK;
+
 #define SETVAL(entity, str, var) else if (strcmp(key, str) == 0) entity->var = int_val
 #define SETFVAL(entity, str, var) else if (strcmp(key, str) == 0) entity->var = float_val
 #define SETFVALZ(entity, str, var, zvar) else if (strcmp(key, str) == 0) {entity->var = float_val; entity->zvar = true;}
@@ -269,7 +282,7 @@ int strip_value(int val);
 
 ProblemType process_thing(thing_hexen_t *thing, char *key, int int_val)
 {
-	if (false);
+	P_START
 	TSETVAL("id", tid);
 	TSETVAL("x", xpos);
 	TSETVAL("y", ypos);
@@ -283,24 +296,27 @@ ProblemType process_thing(thing_hexen_t *thing, char *key, int int_val)
 	}
 	else if (strncmp(key, "arg", 3) == 0)
 	{
-		if (key[3] == '0') thing->arg1 = int_val;
-		else if (key[3] == '1') thing->arg2 = int_val;
-		else if (key[3] == '2') thing->arg3 = int_val;
-		else if (key[3] == '3') thing->arg4 = int_val;
-		else if (key[3] == '4') thing->arg5 = int_val;
-		if (int_val >= 256) return PR_RANGE;
+		int argnum = key[3] - '0' + 1;
+			 if (argnum == 1) thing->arg1 = int_val;
+		else if (argnum == 2) thing->arg2 = int_val;
+		else if (argnum == 3) thing->arg3 = int_val;
+		else if (argnum == 4) thing->arg4 = int_val;
+		else if (argnum == 5) thing->arg5 = int_val;
+		if (int_val >= 256 || int_val < 0) return PR_RANGE;
 	}
 	else if (strncmp(key, "skill", 5) == 0)
 	{
-		if (key[5] == '1') thing->flags |= THF_EASY;
-		else if (key[5] == '2') thing->flags |= THF_MEDIUM;
-		else if (key[5] == '3') thing->flags |= THF_HARD;
+		int skillnum = key[5] - '0';
+			 if (skillnum == 1) thing->flags |= THF_EASY;
+		else if (skillnum == 2) thing->flags |= THF_MEDIUM;
+		else if (skillnum == 3) thing->flags |= THF_HARD;
 	}
 	else if (strncmp(key, "class", 5) == 0)
 	{
-		if (key[5] == '1') thing->flags |= THF_FIGHTER;
-		else if (key[5] == '2') thing->flags |= THF_CLERIC;
-		else if (key[5] == '3') thing->flags |= THF_MAGE;
+		int classnum = key[5] - '0';
+			 if (classnum == 1) thing->flags |= THF_FIGHTER;
+		else if (classnum == 2) thing->flags |= THF_CLERIC;
+		else if (classnum == 3) thing->flags |= THF_MAGE;
 	}
 	TSETFLAG("ambush", THF_AMBUSH);
 	TSETFLAG("dormant", THF_DORMANT);
@@ -312,9 +328,7 @@ ProblemType process_thing(thing_hexen_t *thing, char *key, int int_val)
 	TSETFLAG("strifeally", THF_FRIENDLY);
 	TSETFLAG("standing", THF_STANDSTILL);
 	TSETFLAG("friend", THF_FRIENDLY);
-	else
-		return PR_UNTRANSLATED;
-	return PR_OK;
+	P_END
 }
 
 #define LSETVAL(str, var) SETVAL(linedef, str, var)
@@ -324,10 +338,13 @@ ProblemType process_thing(thing_hexen_t *thing, char *key, int int_val)
 #define LSETMFLAG(str, flag) SETFLAG(mprops, flags, str, flag)
 #define LSETMBLOCK(str, flag) SETFLAG(mprops2, more_block_types, str, flag)
 
+#define SET_HIGH_BYTE(specn, srcarg, dstarg) if (linedef->special == specn && argnum == srcarg) \
+	{linedef->arg##dstarg = int_val >> 8; int_val &= 255;}
+
 ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct *mprops, linedef_more_props_indirect *mprops2,
 							char *key, char *str_val, int int_val, float float_val)
 {
-	if (false);
+	P_START
 	LSETVAL("v1", beginvertex);
 	LSETVAL("v2", endvertex);
 	LSETVAL("sidefront", rsidedef);
@@ -340,23 +357,17 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct 
 	else if (strncmp(key, "arg", 3) == 0)
 	{
 		int argnum = key[3] - '0' + 1;
-		// Handle Sector_Set3dFloor arguments in special way
-		if (linedef->special == 160 && int_val > 255)
-		{
-			if (argnum == 1) // Use high-byte argument
-			{
-				linedef->arg5 = int_val >> 8;
-				int_val &= 255;
-			}
-			if (argnum == 4) // Trunctate alpha to 255
+		SET_HIGH_BYTE(160, 1, 5)
+		// Sector_Set3dFloor: Trunctate alpha to 255
+		if (linedef->special == 160 && argnum == 4 && int_val > 255)
 				int_val = 255;
-		}
-		if (argnum == 1) linedef->arg1 = int_val;
+
+			 if (argnum == 1) linedef->arg1 = int_val;
 		else if (argnum == 2) linedef->arg2 = int_val;
 		else if (argnum == 3) linedef->arg3 = int_val;
 		else if (argnum == 4) linedef->arg4 = int_val;
 		else if (argnum == 5) linedef->arg5 = int_val;
-		if (int_val >= 256) return PR_RANGE;
+		if (int_val >= 256 || int_val < 0) return PR_RANGE;
 	}
 	LSETFLAG("blocking", LHF_BLOCKING);
 	LSETFLAG("blockmonsters", LHF_BLOCKMONSTERS);
@@ -374,6 +385,13 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct 
 	LSETACTV("playercross", LHF_SPAC_Cross)
 	LSETACTV("playeruse", LHF_SPAC_Use)
 	LSETACTV("monstercross", LHF_SPAC_MCross)
+	else if (strcmp(key, "monsteruse") == 0)
+	{
+		if ((linedef->flags & (7 << 10)) == LHF_SPAC_Use)
+			linedef->flags |= LHF_MONSTERSCANACTIVATE;
+		else
+			return PR_CONFLICT;
+	}
 	LSETACTV("impact", LHF_SPAC_Impact)
 	LSETACTV("playerpush", LHF_SPAC_Push)
 	LSETACTV("missilecross", LHF_SPAC_PCross)
@@ -400,13 +418,12 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct 
 	LSETMFLAG("wrapmidtex", LMF_WRAP_MIDTEX);
 	LSETMFLAG("midtex3d", LMF_3DMIDTEX);
 	LSETMFLAG("checkswitchrange", LMF_CHECKSWITCHRANGE);
+	LSETMFLAG("firstsideonly", LMF_FIRSTSIDEONLY);
 	LSETMBLOCK("blockprojectiles", LMB_BLOCKPROJECTILE);
 	LSETMBLOCK("blockuse", LMB_BLOCKUSE);
 	LSETMBLOCK("blocksight", LMB_BLOCKSIGHT);
 	LSETMBLOCK("blockhitscan", LMB_BLOCKHITSCAN);
-	else
-		return PR_UNTRANSLATED;
-	return PR_OK;
+	P_END
 }
 
 #define SIDSETVAL(str, var) SETVAL(sidedef, str, var)
@@ -416,13 +433,15 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct 
 ProblemType process_sidedef(sidedef_t *sidedef, sidedef_more_props *mprops,
 							char *key, char *str_val, int int_val, float float_val)
 {
-	if (false);
+	P_START
+	// Standard fields
 	SIDSETVAL("sector", sectornum);
 	SIDSETVAL("offsetx", xoff);
 	SIDSETVAL("offsety", yoff);
 	SIDSETSTR("texturetop", uppertex);
 	SIDSETSTR("texturemiddle", middletex);
 	SIDSETSTR("texturebottom", lowertex);
+	// ZDoom features fields
 	SIDSETMVAL("light", light);
 	SIDSETMVAL("lightabsolute", lightabsolute);
 	SIDSETMVAL("offsetx_bottom", offsetx_bottom);
@@ -431,9 +450,7 @@ ProblemType process_sidedef(sidedef_t *sidedef, sidedef_more_props *mprops,
 	SIDSETMVAL("offsety_bottom", offsety_bottom);
 	SIDSETMVAL("offsety_mid", offsety_mid);
 	SIDSETMVAL("offsety_top", offsety_top);
-	else
-		return PR_UNTRANSLATED;
-	return PR_OK;
+	P_END
 }
 
 #define SECSETVAL(str, var) SETVAL(sector, str, var)
@@ -445,7 +462,8 @@ ProblemType process_sidedef(sidedef_t *sidedef, sidedef_more_props *mprops,
 ProblemType process_sector(sector_t *sector, sector_more_props *mprops,
 						   char *key, char *str_val, int int_val, float float_val)
 {
-	if (false);
+	P_START
+	// Standard fields
 	SECSETVAL("heightfloor", floorht);
 	SECSETVAL("heightceiling", ceilht);
 	SECSETSTR("texturefloor", floortex);
@@ -453,6 +471,7 @@ ProblemType process_sector(sector_t *sector, sector_more_props *mprops,
 	SECSETVAL("lightlevel", light);
 	SECSETVAL("special", type);
 	SECSETVAL("id", tag);
+	// ZDoom features fields
 	SECSETMVAL("xpanningfloor", xpanningfloor);
 	SECSETMVAL("ypanningfloor", ypanningfloor);
 	SECSETMVAL("xpanningceiling", xpanningceiling);
@@ -463,23 +482,16 @@ ProblemType process_sector(sector_t *sector, sector_more_props *mprops,
 	SECSETMFVAL("yscaleceiling", yscaleceiling);
 	SECSETMVAL("rotationfloor", rotationfloor);
 	SECSETMVAL("rotationceiling", rotationceiling);
+	SECSETMVAL("lightfloor", lightfloor);
+	SECSETMVAL("lightceiling", lightceiling);
+	SECSETMVAL("lightfloorabsolute", lightfloorabsolute);
+	SECSETMVAL("lightceilingabsolute", lightceilingabsolute);
+	SECSETMFVALZ("gravity", gravity, gravity_set)
 	SECSETMVAL("lightcolor", lightcolor);
 	SECSETMVAL("fadecolor", fadecolor);
-	SECSETMFVALZ("gravity", gravity, gravity_set)
 	else if (strcmp(key, "desaturation") == 0)
-	{
 		mprops->desaturation = (int)(float_val * 255.0);
-	}
-	else if (strcmp(key, "lightfloor") == 0)
-		mprops->lightfloor = strip_value(sector->light + int_val);
-	else if (strcmp(key, "lightceiling") == 0)
-	{
-		if (strncmp(sector->ceiltex, "F_SKY", 5) != 0)
-			mprops->lightceiling = strip_value(sector->light + int_val);
-	}
-	else
-		return PR_UNTRANSLATED;
-	return PR_OK;
+	P_END
 }
 
 // *********************************************************** //
@@ -624,14 +636,19 @@ void clear_texture(char *tex)
 
 void print_help(const char* prog)
 {
-	printf("Usage: %s [-S] [-n [-N path]] [-c [-A path]] [-s num] [-i] wadfile\n", prog);
-	printf("  -S: Do not save resulting wad, just print conversion log\n");
-	printf("  -n: Rebuild nodes. Specify nodebuilder path with -N\n");
-	printf("      or NODEBUILDER_PATH variable, default is \"zdbsp.exe\"\n");
-	printf("  -c: Recompile scripts if needed. Specify ACS compiler path with -A\n");
-	printf("      or ACC_PATH variable, default is \"acc.exe\"\n");
-	printf("  -s: Specify number of dummy OPEN script, default is 337\n");
-	printf("  -i: Suppress logging of \"I\" problems\n");
+	printf("Usage: %s [options] wadfile [wadfile ...]\n", prog);
+	printf(
+		"  -S: Do not save resulting wad, just print conversion log\n"
+		"  -n: Rebuild nodes by running nodebuilder\n"
+		"  -N path: Specify nodebuilder path (default is \"zdbsp.exe\")\n"
+		"           NODEBUILDER_PATH env variable can be also used.\n"
+		"  -c: Recompile scripts with ACS compiler if needed.\n"
+		"  -A path: Specify ACS compiler path (default is \"acc.exe\")\n"
+		"           ACC_PATH env variable can be also used.\n"
+		"  -s N: Specify number of created dummy OPEN script (default is 337)\n"
+		"  -i: Suppress logging of \"I\" problems\n"
+		"  -f: Log floating-point values trunctation problems\n"
+		);
 }
 
 // *********************************************************** //
@@ -645,40 +662,47 @@ int main (int argc, char *argv[])
 		return 1;
 	}
 
-	// Parse arguments
+	// List of arguments
 	bool arg_dont_save_wad = false;
 	bool arg_build_nodes = false;
 	bool arg_compile_scripts = false;
-	bool arg_no_logging_ignore = false;
 	int arg_script_number = DEFAULT_SCRIPT_NUM;
+	bool arg_resolve_conflicts = false;
+	bool arg_no_logging_ignore = false;
+	bool arg_log_floating = false;
 	char *arg_nodebuilder_path = getenv("NODEBUILDER_PATH");
 	if (arg_nodebuilder_path == NULL)
 		arg_nodebuilder_path = (char *)"zdbsp.exe";
 	char *arg_acc_path = getenv("ACC_PATH");
 	if (arg_acc_path == NULL)
 		arg_acc_path = (char *)"acc.exe";
+	// Parse arguments
 	int c;
-	while ((c = getopt(argc, argv, "Sncs:N:A:ih")) != -1)
+	while ((c = getopt(argc, argv, "hSnN:cA:s:rif")) != -1)
 	{
-		if (c == 'S')
-			arg_dont_save_wad = true;
-		else if (c == 'n')
-			arg_build_nodes = true;
-		else if (c == 'c')
-			arg_compile_scripts = true;
-		else if (c == 's')
-			arg_script_number = atoi(optarg);
-		else if (c == 'N')
-			arg_nodebuilder_path = optarg;
-		else if (c == 'A')
-			arg_acc_path = optarg;
-		else if (c == 'i')
-			arg_no_logging_ignore = true;
-		else if (c == 'h')
+		if (c == 'h')
 		{
 			print_help(argv[0]);
 			return 0;
 		}
+		else if (c == 'S')
+			arg_dont_save_wad = true;
+		else if (c == 'n')
+			arg_build_nodes = true;
+		else if (c == 'N')
+			arg_nodebuilder_path = optarg;
+		else if (c == 'c')
+			arg_compile_scripts = true;
+		else if (c == 'A')
+			arg_acc_path = optarg;
+		else if (c == 's')
+			arg_script_number = atoi(optarg);
+		else if (c == 'r')
+			arg_resolve_conflicts = true;
+		else if (c == 'i')
+			arg_no_logging_ignore = true;
+		else if (c == 'f')
+			arg_log_floating = true;
 		else
 			return 1;
 	}
@@ -707,6 +731,12 @@ int main (int argc, char *argv[])
 		else
 			fclose(f);
 	}
+
+	// Initialize and load texture properties
+	TexturePropertiesMap texture_properties;
+	TextureProperties init_props = {0, 0, 63}; // Ignore all
+	texture_properties["F_SKY1"] = init_props;
+	texture_properties["VOID"] = init_props;
 
 	// Process all wads given on commandline
 	for (int n = optind; n < argc; n++)
@@ -803,6 +833,11 @@ int main (int argc, char *argv[])
 			char *str_value;
 			int int_value; // For bool, int and float value
 			float float_value;
+			// Variables for reporting trunctated floating-point values
+			bool trunctate_problem = false;
+			float float_x = 0.0;
+			float float_y = 0.0;
+			float float_height = 0.0;
 
 			// Get TEXTMAP lump contents and size
 			char *mapdata = wadfile.get_lump_data(map_lump_pos + 1);
@@ -824,6 +859,19 @@ int main (int argc, char *argv[])
 				}
 				else if (line_type == LN_END)
 				{
+					// Now it's time to report floating-point trunctation problem
+					if (arg_log_floating && trunctate_problem)
+					{
+						if (current_entity == ENT_THING)
+							printf("F Thing %4d (type %5d): x = %9.3f  y = %9.3f  height: %9.3f\n", num_things,
+								   things[num_things].type, float_x, float_y, float_height);
+						else if (current_entity == ENT_VERTEX)
+							printf("F Vertex %4d: x = %9.3f  y = %9.3f\n", num_vertexes, float_x, float_y);
+						trunctate_problem = false;
+						float_height = 0.0;
+					}
+
+					// We just processed whole entity definition so we increase the counter
 					inside_entity = false;
 					(*counters[current_entity - ENT_THING])++;
 				}
@@ -895,25 +943,57 @@ int main (int argc, char *argv[])
 					default: ;
 				}
 
+				// Save original values of coordinates for further trunctation problem report
+				if (arg_log_floating && (strcmp(key, "x") == 0 || strcmp(key, "y") == 0) &&
+						(current_entity == ENT_THING || current_entity == ENT_VERTEX))
+				{
+					if(key[0] == 'x') float_x = float_value;
+					else			  float_y = float_value;
+					if (line_type == VAL_FLOAT)
+						trunctate_problem = true;
+				}
+				if (arg_log_floating && strcmp(key, "height") == 0 && current_entity == ENT_THING)
+				{
+					float_height = float_value;
+					if (line_type == VAL_FLOAT)
+						trunctate_problem = true;
+				}
+
+				// Report string values for textures longer than 8
+				if (strncmp(key, "texture", 7) == 0 && strlen(str_value) > 8)
+					problem = PR_RANGE;
+
+				// Report problems
 				if (problem != PR_OK)
 				{
-					printf("%c %s %5d", problem_type_str[problem], entity_type_str[current_entity - ENT_THING],
-						   *counters[current_entity - ENT_THING]);
-					if (current_entity == ENT_SIDEDEF)
-						printf(" (line %5d %c)", side_to_line_num[num_sidedefs].first, side_to_line_num[num_sidedefs].second?'B':'F');
-					if (current_entity == ENT_LINEDEF)
-						printf(" (special %3d)", linedefs[num_linedefs].special);
-					if (current_entity == ENT_THING)
-						printf(" (type %4d)", things[num_things].type);
-					printf(": ");
-					if (line_type == VAL_STRING)
-						printf("%-16s = %s\n", key, str_value);
-					else if (line_type == VAL_BOOL)
-						printf("%-16s = true\n", key);
-					else if (line_type == VAL_INT)
-						printf("%-16s = %d\n", key, int_value);
-					else if (line_type == VAL_FLOAT)
-						printf("%-16s = %.3f\n", key, float_value);
+					printf("%c ", problem);
+					switch (current_entity)
+					{
+						case ENT_THING:
+							printf("Thing %4d (type %4d sp %3d)", num_things,
+								   things[num_things].type, things[num_things].special);
+							break;
+						case ENT_VERTEX:
+							printf("Vertex %4d", num_vertexes);
+							break;
+						case ENT_LINEDEF:
+							printf("Linedef %5d (special %3d)", num_linedefs, linedefs[num_linedefs].special);
+							break;
+						case ENT_SIDEDEF:
+							printf("Sidedef %5d (line %5d %c)", num_sidedefs,
+								   side_to_line_num[num_sidedefs].first, side_to_line_num[num_sidedefs].second?'B':'F');
+							break;
+						case ENT_SECTOR:
+							printf("Sector %4d", num_sectors);
+							break;
+						default: ;
+					}
+					printf(": %-16s = ", key);
+						 if (line_type == VAL_STRING) printf("%s",   str_value);
+					else if (line_type == VAL_BOOL)   printf("true");
+					else if (line_type == VAL_INT)    printf("%d",   int_value);
+					else if (line_type == VAL_FLOAT)  printf("%.3f", float_value);
+					printf("\n");
 				}
 			}
 
@@ -921,7 +1001,7 @@ int main (int argc, char *argv[])
 			// PART THREE: Post-conversion actions and fixes               //
 			// *********************************************************** //
 
-			// *** PART 3a: Deal with individual offsets for lower, middle and upper linedef textures
+			// *** PART 3a: Process and recompute individual offsets for lower, middle and upper linedef textures
 			for (int i = 0; i < num_sidedefs; i++)
 			{
 				sidedef_t *side = &sidedefs[i];
@@ -986,15 +1066,15 @@ int main (int argc, char *argv[])
 					add_offset_x = mprops->offsetx_bottom;
 					add_offset_y = mprops->offsety_bottom;
 				}
-				if (is_middletex)
-				{
-					add_offset_x = mprops->offsetx_mid;
-					add_offset_y = mprops->offsety_mid;
-				}
 				if (is_uppertex)
 				{
 					add_offset_x = mprops->offsetx_top;
 					add_offset_y = mprops->offsety_top;
+				}
+				if (is_middletex)
+				{
+					add_offset_x = mprops->offsetx_mid;
+					add_offset_y = mprops->offsety_mid;
 				}
 				// Apply additional offset value
 				mprops->offsetx_bottom -= add_offset_x;
@@ -1019,17 +1099,23 @@ int main (int argc, char *argv[])
 				// Print all remaining problems
 				if (arg_no_logging_ignore)
 					continue;
-				const char *msg = "I Side %5d (line %5d %c) %s = %3d\n";
+				const char *msg = "I Sidedef %5d (line %5d %c): %s = %3d (%-8.8s)\n";
 				char side_str = line_side?'B':'F';
-				if (mprops->offsetx_bottom) printf(msg, i, line_num, side_str, "offsetx_bottom", mprops->offsetx_bottom);
-				if (mprops->offsety_bottom) printf(msg, i, line_num, side_str, "offsety_bottom", mprops->offsety_bottom);
-				if (mprops->offsetx_mid)    printf(msg, i, line_num, side_str, "offsetx_mid   ", mprops->offsetx_mid);
-				if (mprops->offsety_mid)    printf(msg, i, line_num, side_str, "offsety_mid   ", mprops->offsety_mid);
-				if (mprops->offsetx_top)    printf(msg, i, line_num, side_str, "offsetx_top   ", mprops->offsetx_top);
-				if (mprops->offsety_top)    printf(msg, i, line_num, side_str, "offsety_top   ", mprops->offsety_top);
+				if (mprops->offsetx_bottom)
+					printf(msg, i, line_num, side_str, "offsetx_bottom", mprops->offsetx_bottom, side->lowertex);
+				if (mprops->offsety_bottom)
+					printf(msg, i, line_num, side_str, "offsety_bottom", mprops->offsety_bottom, side->lowertex);
+				if (mprops->offsetx_mid)
+					printf(msg, i, line_num, side_str, "offsetx_mid   ", mprops->offsetx_mid, side->middletex);
+				if (mprops->offsety_mid)
+					printf(msg, i, line_num, side_str, "offsety_mid   ", mprops->offsety_mid, side->middletex);
+				if (mprops->offsetx_top)
+					printf(msg, i, line_num, side_str, "offsetx_top   ", mprops->offsetx_top, side->uppertex);
+				if (mprops->offsety_top)
+					printf(msg, i, line_num, side_str, "offsety_top   ", mprops->offsety_top, side->uppertex);
 			}
 
-			// *** PART 3b: Deal with sidedef more properties (like light level)
+			// *** PART 3b: Post-process sidedef more properties (like light level)
 			for (int i = 0; i < num_sidedefs; i++)
 			{
 				sidedef_more_props *mprops = &sidedefs_mprops[i];
@@ -1046,27 +1132,120 @@ int main (int argc, char *argv[])
 				}
 
 				// Set proper light levels (according to sector light) for sidedefs with "light" property
-				if (mprops->light != 0)
+				if (mprops->light || mprops->lightabsolute)
 				{
 					// Add up sector light and sidedef light to get the actual light of wall
-					int final_light = mprops->light;
+					int actual_light = mprops->light;
 					if (!mprops->lightabsolute)
-						final_light += sectors[sidedefs[i].sectornum].light;
-					final_light = strip_value(final_light);
+						actual_light += sectors[sidedefs[i].sectornum].light;
+					actual_light = strip_value(actual_light);
 					if (line_side == SIDE_FRONT)
-						linedefs_mprops_indir[line_num].light_front = final_light;
+						linedefs_mprops_indir[line_num].light_front = actual_light;
 					else
-						linedefs_mprops_indir[line_num].light_back = final_light;
+						linedefs_mprops_indir[line_num].light_back = actual_light;
 					any_mprops = true;
 				}
 
 				// If any property is applied to a sidedef, we need to give ID to parent linedef.
-				// We just save the original line special and place SetLineID to it, actual ID will be assigned later
+				// We need backup linedef's original special, line ID will be assigned later.
 				if (any_mprops)
 					backup_and_clear_line_special(line, &linedefs_mprops_indir[line_num]);
 			}
 
-			// *** PART 3c: Fix polyobject things with angle greater than 255
+			// *** PART 3c: Post-process sector more properties
+			for (int i = 0; i < num_sectors; i++)
+			{
+				sector_t *sector = &sectors[i];
+				sector_more_props *mprops = &sectors_mprops[i];
+
+				// Set proper floor/ceiling light levels according to sector light
+				if (mprops->lightfloor || mprops->lightfloorabsolute)
+				{
+					int actual_light = mprops->lightfloor;
+					if (!mprops->lightfloorabsolute)
+						actual_light += sector->light;
+					actual_light = strip_value(actual_light);
+					mprops->lightfloor = actual_light;
+					mprops->lightfloorabsolute = true;
+				}
+				if (mprops->lightceiling || mprops->lightceilingabsolute)
+				{
+					int actual_light = mprops->lightceiling;
+					if (!mprops->lightceilingabsolute)
+						actual_light += sector->light;
+					actual_light = strip_value(actual_light);
+					mprops->lightceiling = actual_light;
+					mprops->lightceilingabsolute = true;
+				}
+
+				/*if(mprops->xpanningfloor || mprops->ypanningfloor)
+					printf("Sector %d F: %-8.8s xpan %3d ypan %3d\n", i, sector->floortex, mprops->xpanningfloor, mprops->ypanningfloor);
+				if(mprops->xpanningceiling || mprops->ypanningceiling)
+					printf("Sector %d C: %-8.8s xpan %3d ypan %3d\n", i, sector->ceiltex, mprops->xpanningceiling, mprops->ypanningceiling);
+				*/
+				// Always ignore one-pixel panning
+				/*if (abs(mprops->xpanningfloor) == 1) mprops->xpanningfloor = 0;
+				if (abs(mprops->ypanningfloor) == 1) mprops->ypanningfloor = 0;
+				if (abs(mprops->xpanningceiling) == 1) mprops->xpanningceiling = 0;
+				if (abs(mprops->ypanningceiling) == 1) mprops->ypanningceiling = 0;*/
+
+				// Normalize pannings by 128
+				/*mprops->xpanningfloor &= 127;
+				mprops->ypanningfloor &= 127;
+				mprops->xpanningceiling &= 127;
+				mprops->ypanningceiling &= 127;*/
+
+				// Apply normalization/ignoring
+				TexturePropertiesMap::iterator txprop_it;
+				// For floor texture
+				txprop_it = texture_properties.find(sector->floortex);
+				if (txprop_it != texture_properties.end())
+				{
+					TextureProperties &txprops = txprop_it->second;
+					if (txprops.ignore_flags & IGN_PANNING)
+					{
+						mprops->xpanningfloor = 0;
+						mprops->ypanningfloor = 0;
+					}
+					if (txprops.ignore_flags & IGN_SCALE)
+					{
+						mprops->xscalefloor = 0.0;
+						mprops->yscalefloor = 0.0;
+					}
+					if (txprops.ignore_flags & IGN_ROTATION)
+						mprops->rotationfloor = 0;
+					if (txprops.ignore_flags & IGN_LIGHT)
+					{
+						mprops->lightfloor = 0;
+						mprops->lightfloorabsolute = false;
+					}
+				}
+				// For ceiling texture
+				txprop_it = texture_properties.find(sector->ceiltex);
+				if (txprop_it != texture_properties.end())
+				{
+					TextureProperties &txprops = txprop_it->second;
+					if (txprops.ignore_flags & IGN_PANNING)
+					{
+						mprops->xpanningceiling = 0;
+						mprops->ypanningceiling = 0;
+					}
+					if (txprops.ignore_flags & IGN_SCALE)
+					{
+						mprops->xscaleceiling = 0.0;
+						mprops->yscaleceiling = 0.0;
+					}
+					if (txprops.ignore_flags & IGN_ROTATION)
+						mprops->rotationceiling = 0;
+					if (txprops.ignore_flags & IGN_LIGHT)
+					{
+						mprops->lightceiling = 0;
+						mprops->lightceilingabsolute = false;
+					}
+				}
+			}
+
+			// *** PART 3d: Fix polyobject things with angle greater than 255
 			for (int i = 0; i < num_things; i++)
 			{
 				thing_hexen_t *thing = &things[i];
@@ -1235,13 +1414,22 @@ int main (int argc, char *argv[])
 					map<int, int>::iterator tag_it = tag_to_secnum_map.find(tag);
 					if (tag_it == tag_to_secnum_map.end())
 					{
+						// No other sector with same tag exists yet. Just register it and continue.
 						tag_to_secnum_map[tag] = i;
 						continue;
 					}
-					if (memcmp(sm, &sectors_mprops[tag_it->second], sizeof(sector_more_props)) != 0)
+					// Other sector with same tag exists, must check if properties are same
+					if (memcmp(sm, &sectors_mprops[tag_it->second], sizeof(sector_more_props)) == 0)
+						continue;	// Properties are same, nothing more to do here
+					// Properties are different = CONFLICT!!!
+					if (!arg_resolve_conflicts)
+					{
 						printf("C Sectors %5d and %5d have same tag (%d) but different properties.\n",
 							   i, tag_it->second, tag);
-					continue;
+						continue;
+					}
+					// Conflict needs to be resolved, so we let assign this sector different tag
+					sm->original_tag = tag; // Backup original tag
 				}
 				// Sector has zero tag. Give it new tag.
 				// If any sector with same properties already exists, give current sector same tag.
@@ -1255,6 +1443,9 @@ int main (int argc, char *argv[])
 						sectors_mprops_hash_map[hash] = i;
 						int new_tag = max_used_tag + (++extra_sector_tag_count);
 						sectors[i].tag = new_tag;
+						if (sm->original_tag)
+							printf("C Sector %5d: Tag %d was changed to %d due to conflict.\n",
+								   i, sm->original_tag, new_tag);
 						tag_to_secnum_map[new_tag] = i;
 						break;
 					}
@@ -1263,6 +1454,9 @@ int main (int argc, char *argv[])
 					{
 						// Properties are same, can assign same tag to this sector
 						sectors[i].tag = sectors[hash_it->second].tag;
+						if (sm->original_tag)
+							printf("C Sector %5d: Tag %d was changed to %d due to conflict.\n",
+								   i, sm->original_tag, sectors[i].tag);
 						break;
 					}
 					// Properties differ -> hash collision. Use next hash.
@@ -1298,9 +1492,9 @@ int main (int argc, char *argv[])
 				if (mprops->gravity_set)
 					scr+=sprintf(scr,"   Sector_SetGravity(%d, %d, %d);\n", tag,
 						   (int)mprops->gravity, (int)((mprops->gravity - (int)mprops->gravity)*100.0 + 0.001));
-				if (mprops->lightfloor)
+				if (mprops->lightfloorabsolute)
 					pending_transfer_specials[mprops->lightfloor].push_back(make_pair(TR_LIGHT_FLOOR, tag));
-				if (mprops->lightceiling)
+				if (mprops->lightceilingabsolute)
 					pending_transfer_specials[mprops->lightceiling].push_back(make_pair(TR_LIGHT_CEILING, tag));
 			}
 
@@ -1538,6 +1732,9 @@ int main (int argc, char *argv[])
 			wadfile.append_lump(wfMapLumpTypeStr[ML_BEHAVIOR], behavior_size, behavior_data, 0, 0, false);
 			wadfile.append_lump(wfMapLumpTypeStr[ML_SCRIPTS], scripts_size, final_script, 0, 0, false);
 		}
+
+		if (arg_dont_save_wad)
+			continue;
 
 		// Finally save the wad
 		// Remove extension from filename
