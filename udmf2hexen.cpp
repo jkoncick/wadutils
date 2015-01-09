@@ -1,5 +1,6 @@
 #include "wad_file.h"
 #include <map>
+#include <set>
 #include <getopt.h>
 
 // *********************************************************** //
@@ -130,21 +131,6 @@ enum linedef_more_block_types
 	LMB_BLOCKHITSCAN = 512
 };
 
-// More linedef properties which must be set from a script or by a transfer special
-struct linedef_more_props_indirect
-{
-	// If some dummy special was put to a line, the previous special must be set from script
-	uint8_t special;
-	uint8_t arg1;
-	uint8_t arg2;
-	uint8_t arg3;
-	uint8_t arg4;
-	uint8_t arg5;
-	uint16_t more_block_types;
-	int16_t light_front;
-	int16_t light_back;
-};
-
 // More sidedef properties not directly settable. Will be copied to respective linedef's properties.
 struct sidedef_more_props
 {
@@ -156,6 +142,20 @@ struct sidedef_more_props
 	int16_t offsety_bottom;
 	int16_t offsety_mid;
 	int16_t offsety_top;
+};
+
+// More linedef properties which must be set from a script or by a transfer special
+struct linedef_more_props_indirect
+{
+	// If some dummy special was put to a line, the previous special must be set from script
+	uint8_t special;
+	uint8_t arg1;
+	uint8_t arg2;
+	uint8_t arg3;
+	uint8_t arg4;
+	uint8_t arg5;
+	uint16_t more_block_types;
+	sidedef_more_props sides[2];
 };
 
 // More sector properties not directly settable
@@ -357,10 +357,11 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct 
 	else if (strncmp(key, "arg", 3) == 0)
 	{
 		int argnum = key[3] - '0' + 1;
-		SET_HIGH_BYTE(160, 1, 5)
-		// Sector_Set3dFloor: Trunctate alpha to 255
+		// Trunctate alpha argument to 255 for 3D floors
 		if (linedef->special == 160 && argnum == 4 && int_val > 255)
-				int_val = 255;
+			int_val = 255;
+		// Set high bytes for specials which provide it
+		SET_HIGH_BYTE(160, 1, 5)
 
 			 if (argnum == 1) linedef->arg1 = int_val;
 		else if (argnum == 2) linedef->arg2 = int_val;
@@ -509,20 +510,21 @@ uint32_t compute_hash(uint8_t *data, int size)
 	return result;
 }
 
-void backup_and_clear_line_special(linedef_hexen_t *line, linedef_more_props_indirect *mprops)
+bool backup_and_clear_line_special(linedef_hexen_t *line, linedef_more_props_indirect *mprops)
 {
+	int sp = line->special;
 	// Assure that all arguments are zero
-	if (line->special == 0)
+	if (sp == 0)
 	{
 		line->arg1 = 0;
 		line->arg2 = 0;
 		line->arg3 = 0;
 		line->arg4 = 0;
 		line->arg5 = 0;
-		return;
+		return false;
 	}
 	// Backup all linedef specials which cannot hold Line ID
-	if (line->special != 121 && line->special != 208 && line->special != 160)
+	if (sp != 121 && sp != 208 && sp != 160 && sp != 1 && sp != 5 && sp != 181 && sp != 215 && sp != 222)
 	{
 		mprops->special = line->special;
 		mprops->arg1 = line->arg1;
@@ -536,43 +538,54 @@ void backup_and_clear_line_special(linedef_hexen_t *line, linedef_more_props_ind
 		line->arg3 = 0;
 		line->arg4 = 0;
 		line->arg5 = 0;
+		return true;
 	}
+	return false;
 }
 
 void set_line_id(linedef_hexen_t *line, int lineid, int flags, int line_num)
 {
 	const char *msg_lineid_range = "R Linedef %5d (special %3d): Cannot set line ID %d which is greater than 255\n";
 	const char *msg_flags = "C Linedef %5d (special %3d): Cannot set additional flags (%d)\n";
-	switch (line->special)
+	if (line->special == 0)
+		line->special = 121;
+	if (line->special == 121)
 	{
-		case 0:
-			line->special = 121;
-		case 121:
-		{
-			line->arg1 = lineid & 255;
-			line->arg5 = lineid >> 8;
-			if (flags) line->arg2 = flags;
-			break;
-		}
-		case 208:
-		{
-			line->arg1 = lineid & 255;
-			line->arg5 = lineid >> 8;
-			if (flags) line->arg4 = flags;
-			if (lineid > 255) printf(msg_lineid_range, line_num, line->special, lineid);
-			break;
-		}
-		case 160:
+		line->arg1 = lineid & 255;
+		line->arg5 = lineid >> 8;
+		line->arg2 |= flags;
+		return;
+	}
+	else if (line->special == 208)
+	{
+		line->arg1 = lineid & 255;
+		line->arg5 = lineid >> 8;
+		line->arg4 |= flags;
+		if (lineid > 255) printf(msg_lineid_range, line_num, line->special, lineid);
+		return;
+	}
+	else if (line->special == 160)
+	{
+		if (line->arg5)
+			printf("C Linedef %5d (special 160): Cannot set line ID %d because arg5 is already used.", line_num, lineid);
+		else
 		{
 			line->arg2 |= 8;
 			line->arg5 = lineid & 255;
-			if (flags) printf(msg_flags, line_num, line->special, flags);
-			if (lineid > 255) printf(msg_lineid_range, line_num, line->special, lineid);
-			break;
 		}
-		default:
-			printf("E Linedef %5d (special %3d): Cannot set line ID %d\n", line_num, line->special, lineid);
 	}
+	else if (line->special == 1) line->arg4 = lineid & 255;
+	else if (line->special == 5) line->arg5 = lineid & 255;
+	else if (line->special == 181) line->arg3 = lineid & 255;
+	else if (line->special == 215) line->arg1 = lineid & 255;
+	else if (line->special == 222) line->arg1 = lineid & 255;
+	else
+	{
+		printf("E Linedef %5d (special %3d): Cannot set line ID %d\n", line_num, line->special, lineid);
+		return;
+	}
+	if (flags) printf(msg_flags, line_num, line->special, flags);
+	if (lineid > 255) printf(msg_lineid_range, line_num, line->special, lineid);
 }
 
 int get_line_id(linedef_hexen_t *line)
@@ -584,6 +597,15 @@ int get_line_id(linedef_hexen_t *line)
 			return line->arg1 + (line->arg5 << 8);
 		case 160:
 			return (line->arg2 & 8)?line->arg5:0;
+		case 1:
+			return line->arg4;
+		case 5:
+			return line->arg5;
+		case 181:
+			return line->arg3;
+		case 215:
+		case 222:
+			return line->arg1;
 		default:
 			return 0;
 	}
@@ -668,6 +690,7 @@ int main (int argc, char *argv[])
 	bool arg_compile_scripts = false;
 	int arg_script_number = DEFAULT_SCRIPT_NUM;
 	bool arg_resolve_conflicts = false;
+	int arg_use_separate_offsets = 1;
 	bool arg_no_logging_ignore = false;
 	bool arg_log_floating = false;
 	char *arg_nodebuilder_path = getenv("NODEBUILDER_PATH");
@@ -678,7 +701,7 @@ int main (int argc, char *argv[])
 		arg_acc_path = (char *)"acc.exe";
 	// Parse arguments
 	int c;
-	while ((c = getopt(argc, argv, "hSnN:cA:s:rif")) != -1)
+	while ((c = getopt(argc, argv, "hSnN:cA:s:ro:if")) != -1)
 	{
 		if (c == 'h')
 		{
@@ -699,6 +722,8 @@ int main (int argc, char *argv[])
 			arg_script_number = atoi(optarg);
 		else if (c == 'r')
 			arg_resolve_conflicts = true;
+		else if (c == 'o')
+			arg_use_separate_offsets = atoi(optarg);
 		else if (c == 'i')
 			arg_no_logging_ignore = true;
 		else if (c == 'f')
@@ -768,7 +793,6 @@ int main (int argc, char *argv[])
 			static vertex_more_props           vertexes_mprops      [MAX_VERTEXES];
 			static linedef_more_props_direct   linedefs_mprops_dir  [MAX_LINEDEFS];
 			static linedef_more_props_indirect linedefs_mprops_indir[MAX_LINEDEFS];
-			static sidedef_more_props          sidedefs_mprops      [MAX_SIDEDEFS];
 			static sector_more_props           sectors_mprops       [MAX_SECTORS];
 			// Additional script
 			static char additional_script[SCRIPT_SIZE];
@@ -796,7 +820,6 @@ int main (int argc, char *argv[])
 			memset(vertexes_mprops, 0, sizeof(vertex_more_props) * MAX_VERTEXES);
 			memset(linedefs_mprops_dir, 0, sizeof(linedef_more_props_direct) * MAX_LINEDEFS);
 			memset(linedefs_mprops_indir, 0, sizeof(linedef_more_props_indirect) * MAX_LINEDEFS);
-			memset(sidedefs_mprops, 0, sizeof(sidedef_more_props) * MAX_SIDEDEFS);
 			memset(sectors_mprops, 0, sizeof(sector_more_props) * MAX_SECTORS);
 			memset(additional_script, 0, SCRIPT_SIZE);
 
@@ -929,7 +952,10 @@ int main (int argc, char *argv[])
 					case ENT_SIDEDEF:
 					{
 						int cur_sidedef = num_sidedefs;
-						problem = process_sidedef(&sidedefs[cur_sidedef], &sidedefs_mprops[cur_sidedef],
+						int line_num = side_to_line_num[cur_sidedef].first;
+						LineSide line_side = side_to_line_num[cur_sidedef].second;
+						problem = process_sidedef(&sidedefs[cur_sidedef],
+												  &linedefs_mprops_indir[line_num].sides[line_side],
 												  key, str_value, int_value, float_value);
 						break;
 					}
@@ -1001,16 +1027,31 @@ int main (int argc, char *argv[])
 			// PART THREE: Post-conversion actions and fixes               //
 			// *********************************************************** //
 
+			// Get all sector tags with 3d floors
+			set<int> tags_3d_floors;
+			for (int i = 0; i < num_linedefs; i++)
+			{
+				linedef_hexen_t *line = &linedefs[i];
+				if (line->special == 160)
+				{
+					int tag = line->arg1 + (line->arg5 << 8);
+					//int secnum = sidedefs[line->rsidedef].sectornum;
+					tags_3d_floors.insert(tag);
+				}
+			}
+			int specials_replaced = 0;
+
 			// *** PART 3a: Process and recompute individual offsets for lower, middle and upper linedef textures
 			for (int i = 0; i < num_sidedefs; i++)
 			{
 				sidedef_t *side = &sidedefs[i];
-				sidedef_more_props *mprops = &sidedefs_mprops[i];
 				int line_num = side_to_line_num[i].first;
 				LineSide line_side = side_to_line_num[i].second;
+				sidedef_more_props *mprops = &linedefs_mprops_indir[line_num].sides[line_side];
 
 				// First clear sidedef textures which are not visible
 				linedef_hexen_t *line = &linedefs[line_num];
+				bool is_3d_floor_middletex = false;
 				// If line is one-sided, we can simply clear upper and lower textures
 				if (line->lsidedef == 65535)
 				{
@@ -1028,6 +1069,9 @@ int main (int argc, char *argv[])
 						sector_back = &sectors[sidedefs[line->lsidedef].sectornum];
 					else
 						sector_back = &sectors[sidedefs[line->rsidedef].sectornum];
+					// Check if there is a "middle texture" belonging to a 3D floor
+					is_3d_floor_middletex = tags_3d_floors.find(sector_back->tag) != tags_3d_floors.end()
+							&& sector_front->tag != sector_back->tag;
 
 					// Clear lower and upper textures if they are not visible at all.
 					// Both sectors need to have zero tag.
@@ -1048,7 +1092,7 @@ int main (int argc, char *argv[])
 				}
 
 				bool is_lowertex = side->lowertex[0] != '-';
-				bool is_middletex = side->middletex[0] != '-';
+				bool is_middletex = side->middletex[0] != '-' || (is_3d_floor_middletex && !mprops->offsetx_bottom);
 				bool is_uppertex = side->uppertex[0] != '-';
 
 				// If there are no textures at all, we can also clear other obsoleted properties
@@ -1097,30 +1141,46 @@ int main (int argc, char *argv[])
 				mprops->offsetx_mid &= 127;
 				mprops->offsetx_top &= 127;
 				// Print all remaining problems
-				if (arg_no_logging_ignore)
-					continue;
 				const char *msg = "I Sidedef %5d (line %5d %c): %s = %3d (%-8.8s)\n";
 				char side_str = line_side?'B':'F';
-				if (mprops->offsetx_bottom)
-					printf(msg, i, line_num, side_str, "offsetx_bottom", mprops->offsetx_bottom, side->lowertex);
-				if (mprops->offsety_bottom)
-					printf(msg, i, line_num, side_str, "offsety_bottom", mprops->offsety_bottom, side->lowertex);
-				if (mprops->offsetx_mid)
-					printf(msg, i, line_num, side_str, "offsetx_mid   ", mprops->offsetx_mid, side->middletex);
-				if (mprops->offsety_mid)
-					printf(msg, i, line_num, side_str, "offsety_mid   ", mprops->offsety_mid, side->middletex);
-				if (mprops->offsetx_top)
-					printf(msg, i, line_num, side_str, "offsetx_top   ", mprops->offsetx_top, side->uppertex);
-				if (mprops->offsety_top)
-					printf(msg, i, line_num, side_str, "offsety_top   ", mprops->offsety_top, side->uppertex);
+				if (arg_use_separate_offsets < 2)
+				{
+					if (!arg_no_logging_ignore)
+					{
+						if (mprops->offsetx_bottom)
+							printf(msg, i, line_num, side_str, "offsetx_bottom", mprops->offsetx_bottom, side->lowertex);
+						if (mprops->offsetx_mid)
+							printf(msg, i, line_num, side_str, "offsetx_mid   ", mprops->offsetx_mid, side->middletex);
+						if (mprops->offsetx_top)
+							printf(msg, i, line_num, side_str, "offsetx_top   ", mprops->offsetx_top, side->uppertex);
+					}
+					mprops->offsetx_bottom = 0;
+					mprops->offsetx_mid = 0;
+					mprops->offsetx_top = 0;
+				}
+				if (arg_use_separate_offsets < 1)
+				{
+					if (!arg_no_logging_ignore)
+					{
+						if (mprops->offsety_bottom)
+							printf(msg, i, line_num, side_str, "offsety_bottom", mprops->offsety_bottom, side->lowertex);
+						if (mprops->offsety_mid)
+							printf(msg, i, line_num, side_str, "offsety_mid   ", mprops->offsety_mid, side->middletex);
+						if (mprops->offsety_top)
+							printf(msg, i, line_num, side_str, "offsety_top   ", mprops->offsety_top, side->uppertex);
+					}
+					mprops->offsety_bottom = 0;
+					mprops->offsety_mid = 0;
+					mprops->offsety_top = 0;
+				}
 			}
 
 			// *** PART 3b: Post-process sidedef more properties (like light level)
 			for (int i = 0; i < num_sidedefs; i++)
 			{
-				sidedef_more_props *mprops = &sidedefs_mprops[i];
 				int line_num = side_to_line_num[i].first;
 				LineSide line_side = side_to_line_num[i].second;
+				sidedef_more_props *mprops = &linedefs_mprops_indir[line_num].sides[line_side];
 				linedef_hexen_t *line = &linedefs[line_num];
 				bool any_mprops = false;
 
@@ -1139,17 +1199,17 @@ int main (int argc, char *argv[])
 					if (!mprops->lightabsolute)
 						actual_light += sectors[sidedefs[i].sectornum].light;
 					actual_light = strip_value(actual_light);
-					if (line_side == SIDE_FRONT)
-						linedefs_mprops_indir[line_num].light_front = actual_light;
-					else
-						linedefs_mprops_indir[line_num].light_back = actual_light;
+					mprops->light = actual_light;
+					mprops->lightabsolute = true;
 					any_mprops = true;
 				}
+				if (mprops->offsetx_bottom || mprops->offsetx_top || mprops->offsety_bottom || mprops->offsety_top)
+					any_mprops = true;
 
 				// If any property is applied to a sidedef, we need to give ID to parent linedef.
 				// We need backup linedef's original special, line ID will be assigned later.
 				if (any_mprops)
-					backup_and_clear_line_special(line, &linedefs_mprops_indir[line_num]);
+					specials_replaced += backup_and_clear_line_special(line, &linedefs_mprops_indir[line_num]);
 			}
 
 			// *** PART 3c: Post-process sector more properties
@@ -1274,7 +1334,7 @@ int main (int argc, char *argv[])
 						set_line_id(line, mprops->lineid, mprops->flags, i);
 						continue;
 					}
-					backup_and_clear_line_special(line, &linedefs_mprops_indir[i]);
+					specials_replaced += backup_and_clear_line_special(line, &linedefs_mprops_indir[i]);
 					line->special = 208;
 					line->arg2 = mprops->alpha;
 					line->arg3 = mprops->additive?1:0;
@@ -1282,7 +1342,7 @@ int main (int argc, char *argv[])
 				}
 				else if (mprops->flags || mprops->lineid)
 				{
-					backup_and_clear_line_special(line, &linedefs_mprops_indir[i]);
+					specials_replaced += backup_and_clear_line_special(line, &linedefs_mprops_indir[i]);
 					set_line_id(line, mprops->lineid, mprops->flags, i);
 				}
 			}
@@ -1378,12 +1438,19 @@ int main (int argc, char *argv[])
 				// Set other more properties
 				if (mprops->more_block_types)
 					scr+=sprintf(scr,"   Line_SetBlocking(%d, %d, 0);\n", lineid, mprops->more_block_types);
-				if (mprops->light_front != 0)
-					pending_transfer_specials[mprops->light_front].push_back(make_pair(TR_LIGHT_SIDE_FRONT, lineid));
-					//printf("Line ID %2d: front side light level %d\n", lineid, mprops->light_front);
-				if (mprops->light_back != 0)
-					pending_transfer_specials[mprops->light_back].push_back(make_pair(TR_LIGHT_SIDE_BACK, lineid));
-					//printf("Line ID %2d:  back side light level %d\n", lineid, mprops->light_back);
+				for (int side = SIDE_FRONT; side <= SIDE_BACK; side++)
+				{
+					sidedef_more_props *sidmprops = &mprops->sides[side];
+					if (sidmprops->lightabsolute)
+						pending_transfer_specials[sidmprops->light]
+								.push_back(make_pair((TransferType)(TR_LIGHT_SIDE_FRONT + side), lineid));
+					if (sidmprops->offsetx_bottom || sidmprops->offsety_bottom)
+						scr+=sprintf(scr,"   Line_SetTextureOffset(%d, %d.0, %d.0, %d, 12);\n", lineid,
+						   sidmprops->offsetx_bottom, sidmprops->offsety_bottom, side);
+					if (sidmprops->offsetx_top || sidmprops->offsety_top)
+						scr+=sprintf(scr,"   Line_SetTextureOffset(%d, %d.0, %d.0, %d, 9);\n", lineid,
+						   sidmprops->offsetx_top, sidmprops->offsety_top, side);
+				}
 			}
 
 			// *** PART 4c: Process sector properties not directly settable
@@ -1444,8 +1511,15 @@ int main (int argc, char *argv[])
 						int new_tag = max_used_tag + (++extra_sector_tag_count);
 						sectors[i].tag = new_tag;
 						if (sm->original_tag)
+						{
 							printf("C Sector %5d: Tag %d was changed to %d due to conflict.\n",
 								   i, sm->original_tag, new_tag);
+							if (tags_3d_floors.find(sm->original_tag) != tags_3d_floors.end())
+							{
+								printf("I 3D Floor is used on Sector tag %d.\n", sm->original_tag);
+								tags_3d_floors.erase(sm->original_tag);
+							}
+						}
 						tag_to_secnum_map[new_tag] = i;
 						break;
 					}
@@ -1500,6 +1574,7 @@ int main (int argc, char *argv[])
 
 			// *** PART 4d: Place pending transfer specials into map
 
+			int transfer_specials_placed = 0;
 			// Place transfer specials to linedefs surrounding existing sectors with particular light
 			for (int i = 0; i < num_linedefs; i++)
 			{
@@ -1517,6 +1592,7 @@ int main (int argc, char *argv[])
 					continue;
 				TransferEntry &entry = it->second.back();
 				set_transfer_special(line, entry.first, entry.second);
+				transfer_specials_placed++;
 				it->second.pop_back();
 			}
 
@@ -1563,6 +1639,7 @@ int main (int argc, char *argv[])
 							break;
 						TransferEntry &entry = entries.back();
 						set_transfer_special(&linedefs[num_linedefs+i], entry.first, entry.second);
+						transfer_specials_placed++;
 						entries.pop_back();
 					}
 					// Finalize dummy sector creation
@@ -1576,6 +1653,7 @@ int main (int argc, char *argv[])
 			}
 
 			// *** PART 4e: Process vertex properties not directly settable and place additional things into map
+			int things_added = 0;
 			for (int i = 0; i < num_vertexes; i++)
 			{
 				vertex_t *vertex = &vertexes[i];
@@ -1588,6 +1666,7 @@ int main (int argc, char *argv[])
 					things[num_things].ypos = vertex->ypos;
 					things[num_things].zpos = mprops->zfloor;
 					num_things++;
+					things_added++;
 				}
 				if (mprops->zceiling_set)
 				{
@@ -1597,19 +1676,26 @@ int main (int argc, char *argv[])
 					things[num_things].ypos = vertex->ypos;
 					things[num_things].zpos = mprops->zfloor;
 					num_things++;
+					things_added++;
 				}
 			}
 
 			// Print some statistics
-			printf("\n");
+			printf("\n----------------------------------------\n");
+			if (specials_replaced > 0)
+				printf("Replaced %d linedef specials with SetLineID or Translucentline.\n", specials_replaced);
 			if (extra_lineid_count > 0)
 				printf("Created %d extra line IDs in range (%d - %d).\n", extra_lineid_count,
 					   max_used_lineid + 1, max_used_lineid + extra_lineid_count);
 			if (extra_sector_tag_count > 0)
 				printf("Created %d extra sector tags in range (%d - %d).\n", extra_sector_tag_count,
 					   max_used_tag + 1, max_used_tag + extra_sector_tag_count);
+			if (transfer_specials_placed > 0)
+				printf("Placed %d light-transfer specials on specific linedefs.\n", transfer_specials_placed);
 			if (dummy_sectors > 0)
-				printf("Created %d dummy sectors for light-transfer specials in left-bottom map corner.\n", dummy_sectors);
+				printf("  Created %d dummy sectors for this purpose in left-bottom map corner.\n", dummy_sectors);
+			if (things_added > 0)
+				printf("Added %d vertex-height things.\n", things_added);
 
 			// *********************************************************** //
 			// PART FIVE: Save converted map into resulting wad file       //
