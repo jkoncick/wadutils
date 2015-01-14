@@ -1,5 +1,9 @@
 #include "wad_file.h"
 
+// *********************************************************** //
+// Wad lump types and definitions                              //
+// *********************************************************** //
+
 const char *wfMapLumpTypeStr[] = {
 	"",
 	"THINGS",
@@ -15,6 +19,10 @@ const char *wfMapLumpTypeStr[] = {
 	"BEHAVIOR",
 	"SCRIPTS"
 };
+
+// *********************************************************** //
+// WadFile class                                               //
+// *********************************************************** //
 
 WadFile::~WadFile()
 {
@@ -311,4 +319,20 @@ void WadFile::append_lump(string name, int size, char *data, int type, int subty
 	lump.subtype = subtype;
 	lump.deleted = false;
 	lump.dont_free = nofree;
+}
+
+// *********************************************************** //
+// Frequently used auxiliary functions                         //
+// *********************************************************** //
+
+uint32_t compute_hash(uint8_t *data, int size)
+{
+	uint32_t result = 0;
+	for (int i = 0; i < size; i++)
+	{
+		uint32_t val = data[i];
+		val <<= (3 - ((i + (i/4)) & 3)) * 8;
+		result += val;
+	}
+	return result;
 }

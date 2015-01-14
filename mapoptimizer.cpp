@@ -2,18 +2,6 @@
 #include <map>
 #include <getopt.h>
 
-uint32_t compute_hash(uint8_t *data, int size)
-{
-	uint32_t result = 0;
-	for (int i = 0; i < size; i++)
-	{
-		uint32_t val = data[i];
-		val <<= (3 - ((i + (i/4)) & 3)) * 8;
-		result += val;
-	}
-	return result;
-}
-
 int main (int argc, char *argv[])
 {
 	if (argc < 2)
@@ -166,9 +154,9 @@ int main (int argc, char *argv[])
 					if (sp == 181)
 					{
 						// Plane align
-						if ((l->arg1 == 1 || l->arg2 == 1) && l->rsidedef != 65535)
+						if ((l->args[0] == 1 || l->args[1] == 1) && l->rsidedef != 65535)
 							dontjoin_sector[sidedefs_old_data[l->rsidedef].sectornum] = true;
-						if ((l->arg1 == 2 || l->arg2 == 2) && l->lsidedef != 65535)
+						if ((l->args[0] == 2 || l->args[1] == 2) && l->lsidedef != 65535)
 							dontjoin_sector[sidedefs_old_data[l->lsidedef].sectornum] = true;
 						//printf("Linedef %4d has 181 special: %d %d\n", i, linedefs_hexen_data[i].arg1, linedefs_data[i].arg2);
 					}
@@ -176,7 +164,7 @@ int main (int argc, char *argv[])
 							 (sp >= 192 && sp <= 207) || (sp >= 238 && sp <= 242) || sp == 249 || (sp >= 252 && sp <= 255))
 					{
 						// Actions like door, platform, floor, ceiling... which will affect sector on back side if tag is 0
-						if (l->arg1 == 0 && l->lsidedef != 65535)
+						if (l->args[0] == 0 && l->lsidedef != 65535)
 						{
 							dontjoin_sector[sidedefs_old_data[l->lsidedef].sectornum] = true;
 							//printf("Linedef %4d has special %d\n", i, sp);

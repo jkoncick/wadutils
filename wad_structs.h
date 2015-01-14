@@ -36,11 +36,7 @@ struct __attribute__((__packed__)) thing_hexen_t
 	uint16_t type;
 	uint16_t flags;
 	uint8_t special;
-	uint8_t arg1;
-	uint8_t arg2;
-	uint8_t arg3;
-	uint8_t arg4;
-	uint8_t arg5;
+	uint8_t args[5];
 };
 
 enum thing_hexen_flags
@@ -79,11 +75,7 @@ struct __attribute__((__packed__)) linedef_hexen_t
 	uint16_t endvertex;
 	uint16_t flags;
 	uint8_t special;
-	uint8_t arg1;
-	uint8_t arg2;
-	uint8_t arg3;
-	uint8_t arg4;
-	uint8_t arg5;
+	uint8_t args[5];
 	uint16_t rsidedef;
 	uint16_t lsidedef;
 };

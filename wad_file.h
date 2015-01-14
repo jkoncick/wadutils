@@ -10,6 +10,10 @@
 
 using namespace std;
 
+// *********************************************************** //
+// Wad lump types and definitions                              //
+// *********************************************************** //
+
 enum wfLumpType
 {
 	LT_UNKNOWN = 0,
@@ -55,6 +59,10 @@ struct wfLump
 	bool dont_free;
 };
 
+// *********************************************************** //
+// WadFile class                                               //
+// *********************************************************** //
+
 class WadFile
 {
 private:
@@ -93,11 +101,17 @@ public:
 	void append_lump(string name, int size, char *data, int type, int subtype, bool nofree);
 };
 
+// *********************************************************** //
+// Frequently used auxiliary functions                         //
+// *********************************************************** //
+
 static inline string extract_name(char *name)
 {
 	char tmp[9] = {0};
 	strncpy(tmp, name, 8);
 	return string(tmp);
 }
+
+uint32_t compute_hash(uint8_t *data, int size);
 
 #endif // WAD_FILE_H
