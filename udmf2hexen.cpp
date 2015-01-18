@@ -126,6 +126,34 @@ void set_transfer_special(linedef_hexen_t *line, TransferType tr_type, int targe
 	}
 }
 
+TextureProperties *get_texture_properties(char *name, TexturePropertiesMap &txprops_map, TextureProperties *default_props)
+{
+	TexturePropertiesMap::iterator txprop_it;
+	txprop_it = txprops_map.find(extract_name(name));
+	return (txprop_it != txprops_map.end())?&txprop_it->second:default_props;
+}
+
+#define GET_TXPROPS(name) get_texture_properties(name, texture_properties, &def_txprops)
+
+void align_plane_props(plane_more_props *srcprops, plane_more_props *destprops, TextureProperties *srctxprops)
+{
+	if (srcprops->xpanning != destprops->xpanning)
+	{
+		if (srctxprops->flags & IGN_PANNING || srctxprops->flags & IGN_HORIZONTAL_OFFSET)
+			srcprops->xpanning = destprops->xpanning;
+	}
+	if (srcprops->ypanning != destprops->ypanning)
+	{
+		if (srctxprops->flags & IGN_PANNING || srctxprops->flags & IGN_VERTICAL_OFFSET)
+			srcprops->ypanning = destprops->ypanning;
+	}
+	if (srcprops->rotation != destprops->rotation)
+	{
+		if (srctxprops->flags & IGN_ROTATION)
+			srcprops->rotation = destprops->rotation;
+	}
+}
+
 int strip_value(int val)
 {
 	if (val < 0)
@@ -151,6 +179,22 @@ void clear_texture(char *tex)
 		memset(tex, 0, 8);
 		tex[0] = '-';
 	}
+}
+
+int normalize_offset(int value, int size)
+{
+	if (size == 0)   return value;
+	if (size == 1)   return 0;
+	if (size == 128) return value & 127;
+	if (size == 64)  return value & 63;
+	if (size == 32)  return value & 31;
+	if (size == 16)  return value & 15;
+	if (size == 8)   return value & 7;
+	while (value < 0)
+		value += size;
+	while (value >= size)
+		value -= size;
+	return value;
 }
 
 void print_help(const char* prog)
@@ -284,8 +328,12 @@ int main (int argc, char *argv[])
 				def_txprops.width = 0;
 				def_txprops.height = 0;
 				def_txprops.flags = 0;
-				sscanf(tmp, "%s %d %d %d", texture, &def_txprops.width, &def_txprops.height, &def_txprops.flags);
-				def_txprops.flags |= arg_global_ignore_flags;
+				int force_flags = 0;
+				memset(def_txprops.rotated_texture, 0, 8);
+				sscanf(tmp, "%s %d %d %d %d %s", texture, &def_txprops.width, &def_txprops.height,
+					   &def_txprops.flags, &force_flags, def_txprops.rotated_texture);
+				if (!force_flags)
+					def_txprops.flags |= arg_global_ignore_flags;
 				texture_properties[texture] = def_txprops;
 			}
 			fclose(txfile);
@@ -628,6 +676,9 @@ int main (int argc, char *argv[])
 				bool is_lowertex = side->lowertex[0] != '-';
 				bool is_middletex = side->middletex[0] != '-' || (is_3d_floor_middletex);
 				bool is_uppertex = side->uppertex[0] != '-';
+				TextureProperties *lowertex_props = (is_lowertex)?GET_TXPROPS(side->lowertex):&def_txprops;
+				TextureProperties *middletex_props = (is_middletex)?GET_TXPROPS(side->middletex):&def_txprops;
+				TextureProperties *uppertex_props = (is_uppertex)?GET_TXPROPS(side->uppertex):&def_txprops;
 
 				// If there are no textures at all, we can also clear other obsoleted properties
 				if (!is_lowertex && !is_middletex && !is_uppertex)
@@ -674,6 +725,9 @@ int main (int argc, char *argv[])
 				mprops->offsetx_bottom &= 127;
 				mprops->offsetx_mid &= 127;
 				mprops->offsetx_top &= 127;
+				mprops->offsetx_bottom = normalize_offset(mprops->offsetx_bottom, lowertex_props->width);
+				mprops->offsetx_mid = normalize_offset(mprops->offsetx_mid, middletex_props->width);
+				mprops->offsetx_top = normalize_offset(mprops->offsetx_top, uppertex_props->width);
 				// Print all remaining problems
 				const char *msg = "I Sidedef %5d (line %5d %c): %s = %3d (%-8.8s)\n";
 				char side_str = line_side?'B':'F';
@@ -752,106 +806,96 @@ int main (int argc, char *argv[])
 				sector_t *sector = &sectors[i];
 				sector_more_props *mprops = &sectors_mprops[i];
 
-				// Set proper floor/ceiling light levels according to sector light
-				if (mprops->lightfloor || mprops->lightfloorabsolute)
+				// Process sector floor and ceiling properties
+				for (int p = PL_FLOOR; p <= PL_CEILING; p++)
 				{
-					int actual_light = mprops->lightfloor;
-					if (!mprops->lightfloorabsolute)
-						actual_light += sector->light;
-					actual_light = strip_value(actual_light);
-					mprops->lightfloor = actual_light;
-					mprops->lightfloorabsolute = true;
-					if (actual_light == sector->light)
+					plane_more_props *plprops = &mprops->planes[p];
+					char *texture = (p == PL_FLOOR)?sector->floortex:sector->ceiltex;
+					TextureProperties *txprops = GET_TXPROPS(texture);
+
+					// Set proper light level according to sector light
+					if (plprops->light || plprops->lightabsolute)
 					{
-						mprops->lightfloor = 0;
-						mprops->lightfloorabsolute = false;
+						int actual_light = plprops->light;
+						if (!plprops->lightabsolute)
+							actual_light += sector->light;
+						actual_light = strip_value(actual_light);
+						plprops->light = actual_light;
+						plprops->light_set = true;
+					}
+
+					// Apply normalization and ignoring
+					if ((txprops->flags & IGN_ROTATION) == IGN_ROTATION)
+						plprops->rotation = 0;
+					else if ((txprops->flags & IGN_ROTATION) == CAP_ROTATION_180)
+					{
+						if (plprops->rotation >= 180)
+							plprops->rotation -= 180;
+					}
+					else if ((txprops->flags & IGN_ROTATION) == CAP_ROTATION_90)
+					{
+						while (plprops->rotation >= 90)
+							plprops->rotation -= 90;
+					}
+					if (plprops->rotation == 90 && txprops->rotated_texture[0])
+					{	// Replace texture by counterpart one if rotation = 90 degrees
+						memcpy(texture, txprops->rotated_texture, 8);
+						plprops->rotation = 0;
+						// Fix panning and get texture properties for rotated texture
+						txprops = GET_TXPROPS(texture);
+						int tmp = plprops->xpanning;
+						plprops->xpanning = plprops->ypanning;
+						plprops->ypanning = tmp;
+					}
+
+					if (txprops->flags & IGN_PANNING)
+					{
+						plprops->xpanning = 0;
+						plprops->ypanning = 0;
+					}
+					plprops->xpanning = normalize_offset(plprops->xpanning, txprops->width);
+					plprops->ypanning = normalize_offset(plprops->ypanning, txprops->height);
+
+					if (txprops->flags & IGN_SCALE)
+					{
+						plprops->xscale = 0.0;
+						plprops->xscale_set = false;
+						plprops->yscale = 0.0;
+						plprops->yscale_set = false;
+					}
+					if ((txprops->flags & IGN_LIGHT) || sector->light == plprops->light)
+					{
+						plprops->light = 0;
+						plprops->lightabsolute = false;
+						plprops->light_set = false;
+					}
+
+					// Check if light is applied to a tagged sector.
+					// If yes, tag must be set also to transfer-control sector.
+					const char *plane_str[2] = {"Floor", "Ceiling"};
+					if (plprops->light_set && !plprops->lightabsolute && sector->tag && !(txprops->flags & IGN_LIGHT_TAGGING))
+					{
+						printf("I Sector %4d (tag %3d): %s light is %3d (relative %3d) (%-8.8s)\n", i, sector->tag,
+							   plane_str[p], plprops->light, plprops->light - sector->light, sector->floortex);
+						plprops->light += (sector->tag << 8);
 					}
 				}
-				if (mprops->lightceiling || mprops->lightceilingabsolute)
-				{
-					int actual_light = mprops->lightceiling;
-					if (!mprops->lightceilingabsolute)
-						actual_light += sector->light;
-					actual_light = strip_value(actual_light);
-					mprops->lightceiling = actual_light;
-					mprops->lightceilingabsolute = true;
-					if (actual_light == sector->light)
-					{
-						mprops->lightceiling = 0;
-						mprops->lightceilingabsolute = false;
-					}
-				}
-
-				// Apply normalization/ignoring
-				TexturePropertiesMap::iterator txprop_it;
-				TextureProperties *txprops;
-				// For floor texture
-				txprop_it = texture_properties.find(extract_name(sector->floortex));
-				txprops = (txprop_it != texture_properties.end())?&txprop_it->second:&def_txprops;
-				if (txprops->flags & IGN_PANNING)
-				{
-					mprops->xpanningfloor = 0;
-					mprops->ypanningfloor = 0;
-				}
-				if (txprops->flags & IGN_ROTATION)
-					mprops->rotationfloor = 0;
-				if (txprops->flags & IGN_SCALE)
-				{
-					mprops->xscalefloor = 0.0;
-					mprops->xscalefloor_set = false;
-					mprops->yscalefloor = 0.0;
-					mprops->yscalefloor_set = false;
-				}
-				if (txprops->flags & IGN_LIGHT || ((txprops->flags & IGN_LIGHT_IF_TAGGED) && sector->tag))
-				{
-					mprops->lightfloor = 0;
-					mprops->lightfloorabsolute = false;
-				}
-				// For ceiling texture
-				txprop_it = texture_properties.find(extract_name(sector->ceiltex));
-				txprops = (txprop_it != texture_properties.end())?&txprop_it->second:&def_txprops;
-				if (txprops->flags & IGN_PANNING)
-				{
-					mprops->xpanningceiling = 0;
-					mprops->ypanningceiling = 0;
-				}
-				if (txprops->flags & IGN_ROTATION)
-					mprops->rotationceiling = 0;
-				if (txprops->flags & IGN_SCALE)
-				{
-					mprops->xscaleceiling = 0.0;
-					mprops->xscaleceiling_set = false;
-					mprops->yscaleceiling = 0.0;
-					mprops->yscaleceiling_set = false;
-				}
-				if (txprops->flags & IGN_LIGHT || ((txprops->flags & IGN_LIGHT_IF_TAGGED) && sector->tag))
-				{
-					mprops->lightceiling = 0;
-					mprops->lightceilingabsolute = false;
-				}
-
-				if (mprops->lightfloorabsolute && sector->tag)
-					printf("I Sector %4d: Floor light is %3d and sector tag is %d (%-8.8s)\n", i,
-						   mprops->lightfloor, sector->tag, sector->floortex);
-				if (mprops->lightceilingabsolute && sector->tag)
-					printf("I Sector %4d: Ceiling light is %3d and sector tag is %d (%-8.8s)\n", i,
-						   mprops->lightceiling, sector->tag, sector->floortex);
 
 				// Print sector properties if needed
-				if (arg_print_properties)
+				if (!arg_print_properties)
+					continue;
+				for (int p = PL_FLOOR; p <= PL_CEILING; p++)
 				{
-					if (mprops->xpanningfloor || mprops->ypanningfloor || mprops->rotationfloor || mprops->lightfloorabsolute)
-						printf("* Sector %4d F: %-8.8s xpan %3d ypan %3d rotation %3d light %3d\n", i, sector->floortex,
-							   mprops->xpanningfloor, mprops->ypanningfloor, mprops->rotationfloor, mprops->lightfloor);
-					if (mprops->xscalefloor_set || mprops->yscalefloor_set)
-						printf("* Sector %4d F: %-8.8s xscale %5.3f yscale %5.3f\n", i, sector->floortex,
-							   mprops->xscalefloor, mprops->yscalefloor);
-					if (mprops->xpanningceiling || mprops->ypanningceiling || mprops->rotationceiling || mprops->lightceilingabsolute)
-						printf("* Sector %4d C: %-8.8s xpan %3d ypan %3d rotation %3d light %3d\n", i, sector->ceiltex,
-							   mprops->xpanningceiling, mprops->ypanningceiling, mprops->rotationceiling, mprops->lightceiling);
-					if (mprops->xscaleceiling_set || mprops->yscaleceiling_set)
-						printf("* Sector %4d C: %-8.8s xscale %5.3f yscale %5.3f\n", i, sector->ceiltex,
-							   mprops->xscaleceiling, mprops->yscaleceiling);
+					plane_more_props *plprops = &mprops->planes[p];
+					const char plane_char[2] = {'F', 'C'};
+					if (plprops->xpanning || plprops->ypanning || plprops->rotation || plprops->light_set)
+						printf("* Sector %4d (tag %3d) %c: %-8.8s xpan %3d ypan %3d rotation %3d light %3d\n",
+							   i, sector->tag, plane_char[p], (p == PL_FLOOR)?sector->floortex:sector->ceiltex,
+							   plprops->xpanning, plprops->ypanning, plprops->rotation, plprops->light);
+					if (plprops->xscale_set || plprops->yscale_set)
+						printf("* Sector %4d (tag %3d) %c: %-8.8s xscale %5.3f yscale %5.3f\n",
+							   i, sector->tag, plane_char[p], (p == PL_FLOOR)?sector->floortex:sector->ceiltex,
+							   plprops->xscale, plprops->yscale);
 				}
 			}
 
@@ -1020,7 +1064,7 @@ int main (int argc, char *argv[])
 			for (int i = 0; i < num_sectors; i++)
 			{
 				// Check for sector tag
-				sector_more_props *sm = &sectors_mprops[i];
+				sector_more_props *mprops = &sectors_mprops[i];
 				int tag = sectors[i].tag;
 				if (tag > 0)
 				{
@@ -1033,9 +1077,27 @@ int main (int argc, char *argv[])
 						continue;
 					}
 					// Other sector with same tag exists, must check if properties are same
-					if (memcmp(sm, &sectors_mprops[tag_it->second], sizeof(sector_more_props)) == 0)
+					int other_sec_num = tag_it->second;
+					sector_more_props *other_sec_mprops = &sectors_mprops[other_sec_num];
+					if (memcmp(mprops, other_sec_mprops, sizeof(sector_more_props)) == 0)
 						continue;	// Properties are same, nothing more to do here
 					// Properties are different = CONFLICT!!!
+
+					// Try to align plane properties of both sectors (according to IGNORE flags and texture sizes)
+					// This way a conflict may be resolved
+					//align_plane_props(&mprops->planes[PL_FLOOR], &other_sec_mprops->planes[PL_FLOOR],
+					//				  GET_TXPROPS(sectors[i].floortex));
+					//align_plane_props(&mprops->planes[PL_CEILING], &other_sec_mprops->planes[PL_CEILING],
+					//				  GET_TXPROPS(sectors[i].ceiltex));
+					//align_plane_props(&other_sec_mprops->planes[PL_FLOOR], &mprops->planes[PL_FLOOR],
+					//				  GET_TXPROPS(sectors[other_sec_num].floortex));
+					//align_plane_props(&other_sec_mprops->planes[PL_CEILING], &mprops->planes[PL_CEILING],
+					//				  GET_TXPROPS(sectors[other_sec_num].ceiltex));
+					// Compare more-properties again because conflict may be resolved now
+					if (memcmp(mprops, other_sec_mprops, sizeof(sector_more_props)) == 0)
+						continue; // No conflict
+
+					// Conflict is still here
 					if (!arg_resolve_conflicts)
 					{
 						printf("C Sectors %5d and %5d have same tag (%d) but different properties.\n",
@@ -1043,10 +1105,10 @@ int main (int argc, char *argv[])
 						continue;
 					}
 					// Conflict needs to be resolved, so we let assign this sector different tag
-					sm->original_tag = tag; // Backup original tag
+					mprops->original_tag = tag; // Backup original tag
 				}
 				// Check for sector more-properties
-				uint32_t hash = compute_hash((uint8_t *)sm, sizeof(sector_more_props));
+				uint32_t hash = compute_hash((uint8_t *)mprops, sizeof(sector_more_props));
 				if (hash == 0)
 					continue;
 				// If sector has zero tag (or conflict was found), we will give it new tag.
@@ -1061,27 +1123,27 @@ int main (int argc, char *argv[])
 						sectors_mprops_hash_map[hash] = i;
 						int new_tag = max_used_tag + (++extra_sector_tag_count);
 						sectors[i].tag = new_tag;
-						if (sm->original_tag)
+						if (mprops->original_tag)
 						{
 							printf("C Sector %5d: Tag %d was changed to %d due to conflict.\n",
-								   i, sm->original_tag, new_tag);
-							if (tags_3d_floors.find(sm->original_tag) != tags_3d_floors.end())
+								   i, mprops->original_tag, new_tag);
+							if (tags_3d_floors.find(mprops->original_tag) != tags_3d_floors.end())
 							{
-								printf("I 3D Floor is used on Sector tag %d.\n", sm->original_tag);
-								tags_3d_floors.erase(sm->original_tag);
+								printf("I 3D Floor is used on Sector tag %d.\n", mprops->original_tag);
+								tags_3d_floors.erase(mprops->original_tag);
 							}
 						}
 						tag_to_secnum_map[new_tag] = i;
 						break;
 					}
 					// Hash found, compare both sector more properties
-					if (memcmp(sm, &sectors_mprops[hash_it->second], sizeof(sector_more_props)) == 0)
+					if (memcmp(mprops, &sectors_mprops[hash_it->second], sizeof(sector_more_props)) == 0)
 					{
 						// Properties are same, can assign same tag to this sector
 						sectors[i].tag = sectors[hash_it->second].tag;
-						if (sm->original_tag)
+						if (mprops->original_tag)
 							printf("C Sector %5d: Tag %d was changed to %d due to conflict.\n",
-								   i, sm->original_tag, sectors[i].tag);
+								   i, mprops->original_tag, sectors[i].tag);
 						break;
 					}
 					// Properties differ -> hash collision. Use next hash.
@@ -1093,23 +1155,26 @@ int main (int argc, char *argv[])
 			{
 				int tag = tag_it->first;
 				sector_more_props *mprops = &sectors_mprops[tag_it->second];
-				if (mprops->xpanningfloor || mprops->ypanningfloor)
-					scr+=sprintf(scr,"   Sector_SetFloorPanning(%d, %d, 0, %d, 0);\n", tag,
-						   mprops->xpanningfloor, mprops->ypanningfloor);
-				if (mprops->xpanningceiling || mprops->ypanningceiling)
-					scr+=sprintf(scr,"   Sector_SetCeilingPanning(%d, %d, 0, %d, 0);\n", tag,
-						   mprops->xpanningceiling, mprops->ypanningceiling);
-				if (mprops->xscalefloor_set || mprops->yscalefloor_set)
-					scr+=sprintf(scr,"   Sector_SetFloorScale2(%d, %.3f, %.3f);\n", tag,
-						get_scale(mprops->xscalefloor, mprops->xscalefloor_set),
-						get_scale(mprops->yscalefloor, mprops->yscalefloor_set));
-				if (mprops->xscaleceiling_set || mprops->yscaleceiling_set)
-					scr+=sprintf(scr,"   Sector_SetCeilingScale2(%d, %.3f, %.3f);\n", tag,
-						get_scale(mprops->xscaleceiling, mprops->xscaleceiling_set),
-						get_scale(mprops->yscaleceiling, mprops->yscaleceiling_set));
-				if (mprops->rotationfloor || mprops->rotationceiling)
+
+				for (int p = PL_FLOOR; p <= PL_CEILING; p++)
+				{
+					plane_more_props *plprops = &mprops->planes[p];
+					const char *plane_str[2] = {"Floor", "Ceiling"};
+
+					if (plprops->xpanning || plprops->ypanning)
+						scr+=sprintf(scr,"   Sector_Set%sPanning(%d, %d, 0, %d, 0);\n", plane_str[p], tag,
+							   plprops->xpanning, plprops->ypanning);
+					if (plprops->xscale_set || plprops->yscale_set)
+						scr+=sprintf(scr,"   Sector_Set%sScale2(%d, %.3f, %.3f);\n", plane_str[p], tag,
+							get_scale(plprops->xscale, plprops->xscale_set),
+							get_scale(plprops->yscale, plprops->yscale_set));
+					if (plprops->light_set)
+						pending_transfer_specials[plprops->light].push_back
+								(make_pair((TransferType)(TR_LIGHT_FLOOR + p), tag));
+				}
+				if (mprops->planes[PL_FLOOR].rotation || mprops->planes[PL_CEILING].rotation)
 					scr+=sprintf(scr,"   Sector_SetRotation(%d, %d, %d);\n", tag,
-						   mprops->rotationfloor, mprops->rotationceiling);
+						   mprops->planes[PL_FLOOR].rotation, mprops->planes[PL_CEILING].rotation);
 				if (mprops->lightcolor || mprops->desaturation)
 					scr+=sprintf(scr,"   Sector_SetColor(%d, %d, %d, %d, %d);\n", tag,
 						   mprops->lightcolor >> 16, (mprops->lightcolor >> 8) & 255, mprops->lightcolor & 255, mprops->desaturation);
@@ -1119,10 +1184,6 @@ int main (int argc, char *argv[])
 				if (mprops->gravity_set)
 					scr+=sprintf(scr,"   Sector_SetGravity(%d, %d, %d);\n", tag,
 						   (int)mprops->gravity, (int)((mprops->gravity - (int)mprops->gravity)*100.0 + 0.001));
-				if (mprops->lightfloorabsolute)
-					pending_transfer_specials[mprops->lightfloor].push_back(make_pair(TR_LIGHT_FLOOR, tag));
-				if (mprops->lightceilingabsolute)
-					pending_transfer_specials[mprops->lightceiling].push_back(make_pair(TR_LIGHT_CEILING, tag));
 			}
 
 			// *** PART 4d: Place pending transfer specials into map
@@ -1151,13 +1212,20 @@ int main (int argc, char *argv[])
 
 			// Create dummy sectors for placing transfer specials if there doesn't exist any sector with particular light
 			int dummy_sectors = 0;
+			int dummy_sectors_tagged = 0;
 			min_x = min_x & (~31);
 			min_y = (min_y - 32) & (~31);
 			PendingTransferLightSpecials::iterator it;
 			for (it = pending_transfer_specials.begin(); it != pending_transfer_specials.end(); it++)
 			{
 				// Process all remaining pending transfer specials
-				int light = it->first;
+				int light = it->first & 255;
+				int tag = (it->first >> 8);
+				if (tag)
+				{
+					tag += max_used_tag + extra_sector_tag_count;
+					dummy_sectors_tagged++;
+				}
 				vector<TransferEntry> &entries = it->second;
 				while (!entries.empty())
 				{
@@ -1167,6 +1235,7 @@ int main (int argc, char *argv[])
 					sectors[num_sectors].floortex[0] = '-';
 					sectors[num_sectors].ceiltex[0] = '-';
 					sectors[num_sectors].light = light;
+					sectors[num_sectors].tag = tag;
 					vertexes[num_vertexes].xpos  = min_x;
 					vertexes[num_vertexes].ypos  = min_y;
 					vertexes[num_vertexes+1].xpos  = min_x;
@@ -1246,7 +1315,10 @@ int main (int argc, char *argv[])
 			if (transfer_specials_placed > 0)
 				printf("Placed %d light-transfer specials on specific linedefs.\n", transfer_specials_placed);
 			if (dummy_sectors > 0)
-				printf("  Created %d dummy sectors for this purpose in left-bottom map corner.\n", dummy_sectors);
+				printf("  %d dummy sectors were created for this purpose in left-bottom map corner.\n", dummy_sectors);
+			if (dummy_sectors_tagged > 0)
+				printf("  %d of them are tagged for adjusting light level (tag base is %d).\n",
+					   dummy_sectors_tagged, max_used_tag + extra_sector_tag_count);
 			if (things_added > 0)
 				printf("Added %d vertex-height things.\n", things_added);
 
@@ -1380,7 +1452,7 @@ int main (int argc, char *argv[])
 		// Finally save the wad
 		// Remove extension from filename
 		char *ext = strrchr(argv[n], '.');
-		if (strcmp(ext, ".wad") == 0 || strcmp(ext, ".WAD") == 0)
+		if (stricmp(ext, ".wad") == 0)
 			*ext = '\0';
 		string result_filename = string(argv[n]) + "_hexen.wad";
 		if (arg_build_nodes)

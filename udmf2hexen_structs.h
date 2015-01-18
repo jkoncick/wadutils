@@ -58,6 +58,12 @@ enum LineSide
 	SIDE_BACK = 1
 };
 
+enum SectorPlane
+{
+	PL_FLOOR = 0,
+	PL_CEILING = 1
+};
+
 enum IgnoreFlags
 {
 	IGN_HORIZONTAL_OFFSET = 1,
@@ -68,7 +74,7 @@ enum IgnoreFlags
 	IGN_ROTATION = 24,
 	IGN_SCALE = 32,
 	IGN_LIGHT = 64,
-	IGN_LIGHT_IF_TAGGED = 128
+	IGN_LIGHT_TAGGING = 128
 };
 
 struct TextureProperties
@@ -76,6 +82,7 @@ struct TextureProperties
 	int width;
 	int height;
 	int flags;
+	char rotated_texture[8];
 };
 
 typedef map<string, TextureProperties> TexturePropertiesMap;
@@ -162,27 +169,24 @@ struct linedef_more_props_indirect
 };
 
 // More sector properties not directly settable
+struct plane_more_props
+{
+	int16_t xpanning;
+	int16_t ypanning;
+	bool xscale_set;
+	bool yscale_set;
+	float xscale;
+	float yscale;
+	int16_t rotation;
+	int16_t light;
+	bool lightabsolute;
+	bool light_set;
+};
+
 struct sector_more_props
 {
 	uint16_t original_tag;
-	int16_t xpanningfloor;
-	int16_t ypanningfloor;
-	int16_t xpanningceiling;
-	int16_t ypanningceiling;
-	bool xscalefloor_set;
-	bool yscalefloor_set;
-	bool xscaleceiling_set;
-	bool yscaleceiling_set;
-	float xscalefloor;
-	float yscalefloor;
-	float xscaleceiling;
-	float yscaleceiling;
-	int16_t rotationfloor;
-	int16_t rotationceiling;
-	int16_t lightfloor;
-	int16_t lightceiling;
-	bool lightfloorabsolute;
-	bool lightceilingabsolute;
+	plane_more_props planes[2];
 	bool gravity_set;
 	float gravity;
 	uint32_t lightcolor;

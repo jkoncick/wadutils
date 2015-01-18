@@ -202,20 +202,20 @@ ProblemType process_sector(sector_t *sector, sector_more_props *mprops,
 	SECSETVAL("special", type);
 	SECSETVAL("id", tag);
 	// ZDoom features fields
-	SECSETMVAL("xpanningfloor", xpanningfloor);
-	SECSETMVAL("ypanningfloor", ypanningfloor);
-	SECSETMVAL("xpanningceiling", xpanningceiling);
-	SECSETMVAL("ypanningceiling", ypanningceiling);
-	SECSETMFVALZ("xscalefloor", xscalefloor)
-	SECSETMFVALZ("yscalefloor", yscalefloor)
-	SECSETMFVALZ("xscaleceiling", xscaleceiling)
-	SECSETMFVALZ("yscaleceiling", yscaleceiling)
-	SECSETMVAL("rotationfloor", rotationfloor);
-	SECSETMVAL("rotationceiling", rotationceiling);
-	SECSETMVAL("lightfloor", lightfloor);
-	SECSETMVAL("lightceiling", lightceiling);
-	SECSETMVAL("lightfloorabsolute", lightfloorabsolute);
-	SECSETMVAL("lightceilingabsolute", lightceilingabsolute);
+	SECSETMVAL("xpanningfloor", planes[PL_FLOOR].xpanning);
+	SECSETMVAL("ypanningfloor", planes[PL_FLOOR].ypanning);
+	SECSETMVAL("xpanningceiling", planes[PL_CEILING].xpanning);
+	SECSETMVAL("ypanningceiling", planes[PL_CEILING].ypanning);
+	SECSETMFVALZ("xscalefloor", planes[PL_FLOOR].xscale)
+	SECSETMFVALZ("yscalefloor", planes[PL_FLOOR].yscale)
+	SECSETMFVALZ("xscaleceiling", planes[PL_CEILING].xscale)
+	SECSETMFVALZ("yscaleceiling", planes[PL_CEILING].yscale)
+	SECSETMVAL("rotationfloor", planes[PL_FLOOR].rotation);
+	SECSETMVAL("rotationceiling", planes[PL_CEILING].rotation);
+	SECSETMVAL("lightfloor", planes[PL_FLOOR].light);
+	SECSETMVAL("lightceiling", planes[PL_CEILING].light);
+	SECSETMVAL("lightfloorabsolute", planes[PL_FLOOR].lightabsolute);
+	SECSETMVAL("lightceilingabsolute", planes[PL_CEILING].lightabsolute);
 	SECSETMFVALZ("gravity", gravity)
 	SECSETMVAL("lightcolor", lightcolor);
 	SECSETMVAL("fadecolor", fadecolor);
