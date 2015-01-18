@@ -35,6 +35,8 @@ WadFile::~WadFile()
 	}
 }
 
+#define IF_MARKER(markname, flag, val) else if(lump.name == markname) {lumps[i].type = LT_MISC_MARKER; flag+=val;}
+
 bool WadFile::load_wad_file(const char* filename, bool update)
 {
 	// Open wad file
@@ -59,10 +61,15 @@ bool WadFile::load_wad_file(const char* filename, bool update)
 	fseek(source_file, header.infotableofs, SEEK_SET);
 	filelump_t *lump_directory = (filelump_t *)malloc(sizeof(filelump_t) * header.numnlumps);
 	fread(lump_directory, sizeof(filelump_t), header.numnlumps, source_file);
-	// Process all lumps
 	lumps.clear();
 	lumps.resize(header.numnlumps);
+	// Auxiliary variables for detecting lump types
 	int map_start_pos = -1;
+	int inside_sprites = 0;
+	int inside_textures = 0;
+	int inside_patches = 0;
+	int inside_flats = 0;
+	// Process all lumps and detect their types
 	for (unsigned int i = 0; i < header.numnlumps; i++)
 	{
 		// Set lump properties
@@ -82,6 +89,8 @@ bool WadFile::load_wad_file(const char* filename, bool update)
 			if (lump.name != wfMapLumpTypeStr[i - map_start_pos])
 			{
 				map_start_pos = -1;
+				i--;
+				continue;
 			}
 			// If processed all lumps up to BLOCKMAP, we successfully detected a map
 			else if (i - map_start_pos == ML_BLOCKMAP)
@@ -106,6 +115,46 @@ bool WadFile::load_wad_file(const char* filename, bool update)
 			// First lump in UDMF format is TEXTMAP
 			lumps[i-1].type = LT_MAP_HEADER;
 			lumps[i-1].subtype = MF_UDMF;
+		}
+		else if (lump.name == "TEXTURE1" || lump.name == "TEXTURE2")
+			lumps[i].type = LT_MISC_TEXTURES;
+		// Detect START and END markers (i.e for textures)
+		IF_MARKER("S_START", inside_sprites, 1)
+		IF_MARKER("S_END", inside_sprites, -1)
+		IF_MARKER("TX_START", inside_textures, 1)
+		IF_MARKER("TX_END", inside_textures, -1)
+		IF_MARKER("P_START", inside_patches, 1)
+		IF_MARKER("P1_START", inside_patches, 1)
+		IF_MARKER("P2_START", inside_patches, 1)
+		IF_MARKER("P3_START", inside_patches, 1)
+		IF_MARKER("P_END", inside_patches, -1)
+		IF_MARKER("P1_END", inside_patches, -1)
+		IF_MARKER("P2_END", inside_patches, -1)
+		IF_MARKER("P3_END", inside_patches, -1)
+		IF_MARKER("F_START", inside_flats, 1)
+		IF_MARKER("F1_START", inside_flats, 1)
+		IF_MARKER("F2_START", inside_flats, 1)
+		IF_MARKER("F3_START", inside_flats, 1)
+		IF_MARKER("F_END", inside_flats, -1)
+		IF_MARKER("F1_END", inside_flats, -1)
+		IF_MARKER("F2_END", inside_flats, -1)
+		IF_MARKER("F3_END", inside_flats, -1)
+		// Mark all sprites/textures/patches/flats
+		else if (inside_sprites)
+		{
+			lumps[i].type = LT_IMAGE_SPRITE;
+		}
+		else if (inside_textures)
+		{
+			lumps[i].type = LT_IMAGE_TEXTURE;
+		}
+		else if (inside_patches)
+		{
+			lumps[i].type = LT_IMAGE_PATCH;
+		}
+		else if (inside_flats)
+		{
+			lumps[i].type = LT_IMAGE_FLAT;
 		}
 	}
 	free(lump_directory);

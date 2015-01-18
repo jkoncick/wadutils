@@ -6,46 +6,14 @@
 #include <string.h>
 #include <string>
 #include <vector>
+#include "wad_lump_types.h"
 #include "wad_structs.h"
 
 using namespace std;
 
 // *********************************************************** //
-// Wad lump types and definitions                              //
+// Internal lump representation                                //
 // *********************************************************** //
-
-enum wfLumpType
-{
-	LT_UNKNOWN = 0,
-	LT_MAP_HEADER,
-	LT_MAP_LUMP
-};
-
-enum wfMapLumpType
-{
-	ML_HEADER = 0,
-	ML_THINGS,
-	ML_LINEDEFS,
-	ML_SIDEDEFS,
-	ML_VERTEXES,
-	ML_SEGS,
-	ML_SSECTORS,
-	ML_NODES,
-	ML_SECTORS,
-	ML_REJECT,
-	ML_BLOCKMAP,
-	ML_BEHAVIOR,
-	ML_SCRIPTS
-};
-
-enum wfMapFormat
-{
-	MF_DOOM,
-	MF_HEXEN,
-	MF_UDMF
-};
-
-extern const char *wfMapLumpTypeStr[];
 
 struct wfLump
 {

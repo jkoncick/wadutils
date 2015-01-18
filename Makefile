@@ -1,7 +1,7 @@
 CPP=g++
 CPPFLAGS=-Wall
 
-HEADERS=wad_file.h wad_structs.h
+HEADERS=wad_file.h wad_lump_types.h wad_structs.h
 OBJFILES=wad_file.o
 
 all: listlumps texturefinder lumpfinder replacetextures mapstats mapoptimizer udmf2hexen

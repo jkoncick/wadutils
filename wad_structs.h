@@ -159,4 +159,26 @@ struct __attribute__((__packed__)) sector_t
 	uint16_t tag;
 };
 
+struct __attribute__((__packed__)) doom_patch_header_t
+{
+	uint16_t width;
+	uint16_t height;
+	int16_t xoff;
+	int16_t yoff;
+	char otherdata[1];
+};
+
+struct __attribute__((__packed__)) maptexture_t
+{
+	char name[8];
+	uint16_t flags;
+	uint8_t scalex;
+	uint8_t scaley;
+	uint16_t width;
+	uint16_t height;
+	uint8_t columndirectory[4];
+	uint16_t patchcount;
+	char patchdata[1];
+};
+
 #endif // WAD_STRUCTS_H

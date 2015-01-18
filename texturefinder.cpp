@@ -61,6 +61,10 @@ int main (int argc, char *argv[])
 		int map_lump_pos;
 		while ((map_lump_pos = wadfile.find_next_lump_by_type(LT_MAP_HEADER)) != -1)
 		{
+			// Cannot list textures for UDMF maps
+			if (wadfile.get_lump_subtype(map_lump_pos) == MF_UDMF)
+				continue;
+
 			unsigned int lumpsize;
 			char *lump;
 
