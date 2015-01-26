@@ -17,7 +17,7 @@
 #define DEFAULT_SCRIPT_NUM 247 // Simple solution - use some improbably-used script number.
 
 // *********************************************************** //
-// Auxiliary enums and structures                              //
+// Miscellaneous auxiliary enums and structures                //
 // *********************************************************** //
 
 // Types of lines in TEXTMAP lump
@@ -64,28 +64,46 @@ enum SectorPlane
 	PL_CEILING = 1
 };
 
-enum IgnoreFlags
+// *********************************************************** //
+// Structures for texture-related optimizations                //
+// *********************************************************** //
+
+enum TextureFlags
 {
-	IGN_HORIZONTAL_OFFSET = 1,
-	IGN_VERTICAL_OFFSET = 2,
-	IGN_PANNING = 4,
-	CAP_ROTATION_180 = 8,
-	CAP_ROTATION_90 = 16,
-	IGN_ROTATION = 24,
-	IGN_SCALE = 32,
-	IGN_LIGHT = 64,
-	IGN_LIGHT_TAGGING = 128
+	TF_IGNORE_MIDTEX_XOFFSET = 1,
+	TF_SYNC_XOFFSET_FOR_SAME_TEXTURES = 2,
+	TF_NO_PANNING = 4,
+	TF_MAX_ROTATION_180 = 8,
+	TF_MAX_ROTATION_90 = 16,
+	TF_NO_ROTATION = 24,
+	TF_NO_SCALE = 32,
+	TF_NO_LIGHT = 64,
+	TF_NO_LIGHT_TAGGING = 128
 };
 
 struct TextureProperties
 {
 	int width;
 	int height;
+	int rotation_limit;
 	int flags;
 	char rotated_texture[8];
 };
 
 typedef map<string, TextureProperties> TexturePropertiesMap;
+
+struct UniqueSectorMprops
+{
+	vector<int> sectors;
+	TextureProperties floortex_props;
+	TextureProperties ceiltex_props;
+};
+
+typedef map<int, vector<UniqueSectorMprops> > UniqueSectorMpropsTagMap;
+
+// *********************************************************** //
+// Structures for placing light-transfer specials              //
+// *********************************************************** //
 
 enum TransferType
 {
