@@ -1,4 +1,5 @@
 #include <getopt.h>
+#include <queue>
 
 #include "udmf2hexen_structs.h"
 #include "udmf2hexen_parse_textmap.cpp"
@@ -35,8 +36,8 @@ bool backup_and_clear_line_special(linedef_hexen_t *line, linedef_more_props_ind
 
 void set_line_id(linedef_hexen_t *line, int lineid, int flags, int line_num)
 {
-	const char *msg_lineid_range = "R Linedef %5d (special %3d): Cannot set line ID %d which is greater than 255\n";
-	const char *msg_flags = "C Linedef %5d (special %3d): Cannot set additional flags (%d)\n";
+	const char *msg_lineid_range = "R Linedef %5d (special %3d): Cannot set line ID %d (greater than 255)\n";
+	const char *msg_flags = "N Linedef %5d (special %3d): Cannot set additional flags (%d)\n";
 	if (line->special == 0)
 		line->special = 121;
 	if (line->special == 121)
@@ -57,7 +58,10 @@ void set_line_id(linedef_hexen_t *line, int lineid, int flags, int line_num)
 	else if (line->special == 160)
 	{
 		if (line->args[4])
-			printf("C Linedef %5d (special 160): Cannot set line ID %d because arg5 is already used.", line_num, lineid);
+		{
+			printf("N Linedef %5d (special 160): Cannot set line ID %d (arg 5 is already used).\n", line_num, lineid);
+			return;
+		}
 		else
 		{
 			line->args[1] |= 8;
@@ -198,15 +202,15 @@ void combine_txprops(TextureProperties *dest, TextureProperties *src1, TexturePr
 
 void align_plane_props(plane_more_props *srcprops, plane_more_props *destprops, TextureProperties *srctxprops)
 {
+	if (normalize(abs(srcprops->rotation - destprops->rotation), srctxprops->rotation_limit) == 0 &&
+			!(srctxprops->rotation_limit == 1 && srcprops->rotation == 0) && (srctxprops->rotation_limit == 1 || (
+			normalize(srcprops->xpanning, srctxprops->width) == 0 &&
+			normalize(srcprops->ypanning, srctxprops->height) == 0)))
+		srcprops->rotation = destprops->rotation;
 	if (normalize(abs(srcprops->xpanning - destprops->xpanning), srctxprops->width) == 0)
 		srcprops->xpanning = destprops->xpanning;
 	if (normalize(abs(srcprops->ypanning - destprops->ypanning), srctxprops->height) == 0)
 		srcprops->ypanning = destprops->ypanning;
-	/*if (srcprops->rotation != destprops->rotation)
-	{
-		if (srctxprops->flags & TF_NO_ROTATION)
-			srcprops->rotation = destprops->rotation;
-	}*/
 }
 
 // *********************************************************** //
@@ -236,15 +240,19 @@ void print_help(const char* prog)
 	printf("Usage: %s [options] wadfile [wadfile ...]\n", prog);
 	printf(
 		"  -S: Do not save resulting wad, just print conversion log\n"
+		"  -m name: Name of map to convert (all maps if not specified)\n"
 		"  -n: Rebuild nodes by running nodebuilder\n"
-		"  -N path: Specify nodebuilder path (default is \"zdbsp.exe\")\n"
+		"  -N path: Nodebuilder path (default is \"zdbsp.exe\")\n"
 		"           NODEBUILDER_PATH env variable can be also used.\n"
 		"  -c: Recompile scripts with ACS compiler if needed.\n"
-		"  -A path: Specify ACS compiler path (default is \"acc.exe\")\n"
+		"  -A path: ACS compiler path (default is \"acc.exe\")\n"
 		"           ACC_PATH env variable can be also used.\n"
-		"  -s N: Specify number of created dummy OPEN script (default is 337)\n"
-		"  -i: Suppress logging of \"I\" problems\n"
+		"  -s num: Number of created dummy OPEN script (default is 247)\n"
+		"  -r: Resolve-conflicts mode (assign new tags to conflicting sectors)\n"
+		"  -t: Use \"textures.txt\" for texture-based conversion optimizations\n"
+		"  -g flags: Global flags for texture-based conversion optimizations\n"
 		"  -f: Log floating-point values trunctation problems\n"
+		"  -p: Log UDMF-specific properties of sectors and sidedefs\n"
 		);
 }
 
@@ -266,10 +274,8 @@ int main (int argc, char *argv[])
 	bool arg_compile_scripts = false;
 	int  arg_script_number = DEFAULT_SCRIPT_NUM;
 	bool arg_resolve_conflicts = false;
-	int  arg_use_separate_offsets = 1;
 	bool arg_do_texture_optimization = false;
-	int  arg_global_ignore_flags = 0;
-	bool arg_no_logging_ignore = false;
+	int  arg_global_texture_flags = 0;
 	bool arg_log_floating = false;
 	bool arg_print_properties = false;
 	char *arg_nodebuilder_path = getenv("NODEBUILDER_PATH");
@@ -280,7 +286,7 @@ int main (int argc, char *argv[])
 		arg_acc_path = (char *)"acc.exe";
 	// Parse arguments
 	int c;
-	while ((c = getopt(argc, argv, "hSm:nN:cA:s:ro:tg:ifp")) != -1)
+	while ((c = getopt(argc, argv, "hSm:nN:cA:s:rtg:fp")) != -1)
 	{
 		if (c == 'h')
 		{
@@ -303,14 +309,10 @@ int main (int argc, char *argv[])
 			arg_script_number = atoi(optarg);
 		else if (c == 'r')
 			arg_resolve_conflicts = true;
-		else if (c == 'o')
-			arg_use_separate_offsets = atoi(optarg);
 		else if (c == 't')
 			arg_do_texture_optimization = true;
 		else if (c == 'g')
-			arg_global_ignore_flags = atoi(optarg);
-		else if (c == 'i')
-			arg_no_logging_ignore = true;
+			arg_global_texture_flags = atoi(optarg);
 		else if (c == 'f')
 			arg_log_floating = true;
 		else if (c == 'p')
@@ -344,10 +346,14 @@ int main (int argc, char *argv[])
 			fclose(f);
 	}
 
-	// Default texture properties for any texture not defined in a file
-	TextureProperties def_txprops = {0, 0, get_rotation_limit(arg_global_ignore_flags), arg_global_ignore_flags};
-	// Load texture properties from file
 	TexturePropertiesMap texture_properties;
+	// Default texture properties for any texture not defined in a file
+	TextureProperties def_txprops = {0, 0, get_rotation_limit(arg_global_texture_flags), arg_global_texture_flags};
+	// Use this variable for "no texture" or sky. Properties are as most free as possible.
+	TextureProperties notx_props = {1, 1, 1, 255};
+	texture_properties["F_SKY1"] = notx_props;
+	texture_properties["VOID"] = notx_props;
+	// Load texture properties from file
 	if (arg_do_texture_optimization)
 	{
 		TextureProperties tmp_txprops;
@@ -362,13 +368,15 @@ int main (int argc, char *argv[])
 				if (tmp[0] == '\0' || tmp[0] == '#')
 					continue;
 				char texture[9] = {0};
+				char rotated_texture[9] = {0};
 				tmp_txprops.width = 0;
 				tmp_txprops.height = 0;
 				tmp_txprops.flags = 0;
 				int force_flags = 0;
 				memset(tmp_txprops.rotated_texture, 0, 8);
 				sscanf(tmp, "%s %d %d %d %d %s", texture, &tmp_txprops.width, &tmp_txprops.height,
-					   &tmp_txprops.flags, &force_flags, tmp_txprops.rotated_texture);
+					   &tmp_txprops.flags, &force_flags, rotated_texture);
+				memcpy(tmp_txprops.rotated_texture, rotated_texture, 8);
 				// Set also flags implied by texture size
 				if (tmp_txprops.width == 1)
 					tmp_txprops.flags |= TF_IGNORE_MIDTEX_XOFFSET;
@@ -387,10 +395,6 @@ int main (int argc, char *argv[])
 			fclose(txfile);
 		}
 	}
-	// Use this variable for "no texture" or sky. Properties are as most free as possible.
-	TextureProperties notx_props = {1, 1, 1, 255};
-	texture_properties["F_SKY1"] = notx_props;
-	texture_properties["VOID"] = notx_props;
 
 	// Process all wads given on commandline
 	for (int n = optind; n < argc; n++)
@@ -690,6 +694,8 @@ int main (int argc, char *argv[])
 				// First clear sidedef textures which are not visible
 				linedef_hexen_t *line = &linedefs[line_num];
 				bool is_3dfloor_middletex = false;
+				bool lowertex_removed = false;
+				bool uppertex_removed = false;
 				TextureProperties *middletex_3dfloor_props = NULL;
 				// If line is one-sided, we can simply clear upper and lower textures
 				if (line->lsidedef == 65535)
@@ -720,9 +726,9 @@ int main (int argc, char *argv[])
 					if (sector_front->tag == 0 && sector_back->tag == 0)
 					{
 						if (sector_front->floorht >= sector_back->floorht)
-							clear_texture(side->lowertex);
+							lowertex_removed = true;
 						if (sector_front->ceilht <= sector_back->ceilht)
-							clear_texture(side->uppertex);
+							uppertex_removed = true;
 					}
 					// We can also remove middle textures from lines surrounding zero-heighted sectors.
 					// These sectors also need to have zero tag, otherwise they could change their heights.
@@ -732,9 +738,9 @@ int main (int argc, char *argv[])
 						clear_texture(side->middletex);
 				}
 
-				bool is_lowertex = side->lowertex[0] != '-';
+				bool is_lowertex = side->lowertex[0] != '-' && !lowertex_removed;
 				bool is_middletex = side->middletex[0] != '-' || is_3dfloor_middletex;
-				bool is_uppertex = side->uppertex[0] != '-';
+				bool is_uppertex = side->uppertex[0] != '-' && !uppertex_removed;
 				TextureProperties *lowertex_props = (is_lowertex)?GET_TXPROPS(side->lowertex):&notx_props;
 				TextureProperties *middletex_props = (is_middletex)?GET_TXPROPS(side->middletex):&notx_props;
 				TextureProperties *uppertex_props = (is_uppertex)?GET_TXPROPS(side->uppertex):&notx_props;
@@ -742,8 +748,12 @@ int main (int argc, char *argv[])
 					middletex_props = middletex_3dfloor_props;
 				if (middletex_props->flags & TF_IGNORE_MIDTEX_XOFFSET)
 					middletex_props = &notx_props;
-				if ((lowertex_props->flags & TF_SYNC_XOFFSET_FOR_SAME_TEXTURES) && (uppertex_props->flags & TF_SYNC_XOFFSET_FOR_SAME_TEXTURES))
+				if ((lowertex_props->flags & TF_SYNC_XOFFSET) && (uppertex_props->flags & TF_SYNC_XOFFSET))
 					lowertex_props = &notx_props;
+				if ((lowertex_props->flags & TF_SYNC_XOFFSET) && (middletex_props->flags & TF_SYNC_XOFFSET))
+					lowertex_props = &notx_props;
+				if ((uppertex_props->flags & TF_SYNC_XOFFSET) && (middletex_props->flags & TF_SYNC_XOFFSET))
+					uppertex_props = &notx_props;
 
 				// If there are no textures at all, we can also clear other obsoleted properties
 				if (!is_lowertex && !is_middletex && !is_uppertex)
@@ -814,38 +824,13 @@ int main (int argc, char *argv[])
 					}
 
 				// Print all remaining problems
-				const char *msg = "I Sidedef %5d (line %5d %c): %s = %3d (%-8.8s)\n";
 				char side_str = line_side?'B':'F';
-				if (arg_use_separate_offsets < 2)
-				{
-					if (!arg_no_logging_ignore)
-					{
-						if (mprops->offsetx_bottom)
-							printf(msg, i, line_num, side_str, "offsetx_bottom", mprops->offsetx_bottom, side->lowertex);
-						if (mprops->offsetx_mid)
-							printf(msg, i, line_num, side_str, "offsetx_mid   ", mprops->offsetx_mid, side->middletex);
-						if (mprops->offsetx_top)
-							printf(msg, i, line_num, side_str, "offsetx_top   ", mprops->offsetx_top, side->uppertex);
-					}
-					mprops->offsetx_bottom = 0;
-					mprops->offsetx_mid = 0;
-					mprops->offsetx_top = 0;
-				}
-				if (arg_use_separate_offsets < 1)
-				{
-					if (!arg_no_logging_ignore)
-					{
-						if (mprops->offsety_bottom)
-							printf(msg, i, line_num, side_str, "offsety_bottom", mprops->offsety_bottom, side->lowertex);
-						if (mprops->offsety_mid)
-							printf(msg, i, line_num, side_str, "offsety_mid   ", mprops->offsety_mid, side->middletex);
-						if (mprops->offsety_top)
-							printf(msg, i, line_num, side_str, "offsety_top   ", mprops->offsety_top, side->uppertex);
-					}
-					mprops->offsety_bottom = 0;
-					mprops->offsety_mid = 0;
-					mprops->offsety_top = 0;
-				}
+				if (arg_print_properties &&
+					(mprops->offsetx_bottom || mprops->offsetx_top || mprops->offsety_bottom || mprops->offsety_top))
+					printf("* Side %5d (line %5d %c) | %-8.8s %3d %3d | %-8.8s | %-8.8s %3d %3d |\n", i, line_num, side_str,
+						   side->lowertex, mprops->offsetx_bottom, mprops->offsety_bottom,
+						   (is_3dfloor_middletex)?"*3Dfloor":side->middletex,
+						   side->uppertex, mprops->offsetx_top, mprops->offsety_top);
 			}
 
 			// *** PART 3b: Post-process sidedef more properties (like light level)
@@ -915,8 +900,10 @@ int main (int argc, char *argv[])
 						plprops->xpanning = 0;
 						plprops->ypanning = 0;
 					}
-					plprops->xpanning = normalize(plprops->xpanning, txprops->width);
-					plprops->ypanning = normalize(plprops->ypanning, txprops->height);
+					if (!plprops->xscale_set)
+						plprops->xpanning = normalize(plprops->xpanning, txprops->width);
+					if (!plprops->yscale_set)
+						plprops->ypanning = normalize(plprops->ypanning, txprops->height);
 
 					if (plprops->xpanning == 0 && plprops->ypanning == 0)
 						plprops->rotation = normalize(plprops->rotation, txprops->rotation_limit);
@@ -1017,7 +1004,7 @@ int main (int argc, char *argv[])
 
 					if (memcmp(&tmp_this_mprops, &tmp_other_mprops, sizeof(sector_more_props)) == 0)
 					{
-						printf("Successfully aligned mprops for sector tag %d (%d %d)\n", this_sector->tag, unique_sector_mprops.sectors[0], i);
+						//printf("Successfully aligned mprops for sector tag %d (%d %d)\n", this_sector->tag, unique_sector_mprops.sectors[0], i);
 						unique_sector_mprops.sectors.push_back(i);
 						for (unsigned int k = 0; k < unique_sector_mprops.sectors.size(); k++)
 							memcpy(&sectors_mprops[unique_sector_mprops.sectors[k]], &tmp_this_mprops, sizeof(sector_more_props));
@@ -1037,15 +1024,20 @@ int main (int argc, char *argv[])
 				}
 			}
 
-			// *** PART 3e: Fix polyobject things with angle greater than 255
+			// *** PART 3e: Fix polyobject things and SkyViewpoints with number greater than 255
 			for (int i = 0; i < num_things; i++)
 			{
 				thing_hexen_t *thing = &things[i];
 				if (thing->type >= 9300 && thing->type <= 9303 && thing->angle > 255)
 				{
 					if (thing->type == 9300)
-						printf("R Polyobject number %d trunctated to %d\n", thing->angle, thing->angle & 255);
+						printf("I Polyobject number %d trunctated to %d\n", thing->angle, thing->angle & 255);
 					thing->angle &= 255;
+				}
+				if (thing->type == 9080)
+				{
+					printf("I SkyViewpoint tid %d trunctated to %d\n", thing->tid, thing->tid & 255);
+					thing->tid &= 255;
 				}
 			}
 
@@ -1199,6 +1191,7 @@ int main (int argc, char *argv[])
 			// Second find all sectors with same-properties and assign them tags
 			map<uint32_t, int> sectors_mprops_hash_map;
 			map<int, int> tag_to_secnum_map;
+			map<int, vector<int> > new_assigned_tags;
 			for (int i = 0; i < num_sectors; i++)
 			{
 				// Check for sector tag
@@ -1249,11 +1242,7 @@ int main (int argc, char *argv[])
 						{
 							printf("C Sector %5d: Tag %d was changed to %d due to conflict.\n",
 								   i, mprops->original_tag, new_tag);
-							if (tags_3d_floors.find(mprops->original_tag) != tags_3d_floors.end())
-							{
-								printf("I 3D Floor is used on Sector tag %d.\n", mprops->original_tag);
-								tags_3d_floors.erase(mprops->original_tag);
-							}
+							new_assigned_tags[mprops->original_tag].push_back(new_tag);
 						}
 						tag_to_secnum_map[new_tag] = i;
 						break;
@@ -1308,10 +1297,51 @@ int main (int argc, char *argv[])
 						   (int)mprops->gravity, (int)((mprops->gravity - (int)mprops->gravity)*100.0 + 0.001));
 			}
 
-			// *** PART 4d: Place pending transfer specials into map
+			// *** PART 4d: Duplicate Sector_Set3dFloor and transfer specials for all newly assigned sector tags
+			map<int, vector<int> >::iterator newtags_it;
+			for (newtags_it = new_assigned_tags.begin(); newtags_it != new_assigned_tags.end(); newtags_it++)
+			{
+				int original_tag = newtags_it->first;
+				vector<int>& new_tags = newtags_it->second;
+				// Search for all specials having reference to original sector tag
+				for (int i = 0; i < num_linedefs; i++)
+				{
+					linedef_hexen_t *line = &linedefs[i];
+					if (!(line->special == 160 && line->args[0] == original_tag))
+						continue;
+					// Linedef has a special we need to duplicate
+					queue<int> lines_to_split;
+					lines_to_split.push(i);
+					while (!new_tags.empty())
+					{
+						int linenum = lines_to_split.front();
+						lines_to_split.pop();
+						linedef_hexen_t *line_to_split = &linedefs[linenum];
+						// Split linedef
+						int start_x = vertexes[line_to_split->beginvertex].xpos;
+						int start_y = vertexes[line_to_split->beginvertex].ypos;
+						int end_x = vertexes[line_to_split->endvertex].xpos;
+						int end_y = vertexes[line_to_split->endvertex].ypos;
+						vertexes[num_vertexes].xpos = (start_x + end_x) / 2;
+						vertexes[num_vertexes].ypos = (start_y + end_y) / 2;
+						memcpy(&linedefs[num_linedefs], line_to_split, sizeof(linedef_hexen_t));
+						memcpy(&sidedefs[num_sidedefs], &sidedefs[line_to_split->rsidedef], sizeof(sidedef_t));
+						line_to_split->endvertex = num_vertexes;
+						linedefs[num_linedefs].beginvertex = num_vertexes++;
+						linedefs[num_linedefs].rsidedef = num_sidedefs++;
+						// Put reference to new sector tag on new linedef
+						linedefs[num_linedefs].args[0] = new_tags.back();
+						new_tags.pop_back();
+						// Insert both linedefs into queue
+						lines_to_split.push(linenum);
+						lines_to_split.push(num_linedefs++);
+					}
+				}
+			}
 
+			// *** PART 4e: Place pending transfer specials into map
 			int transfer_specials_placed = 0;
-			// Place transfer specials to linedefs surrounding existing sectors with particular light
+			// Phase 1: Place transfer specials to linedefs facing existing sectors with desired light
 			for (int i = 0; i < num_linedefs; i++)
 			{
 				linedef_hexen_t *line = &linedefs[i];
@@ -1332,7 +1362,7 @@ int main (int argc, char *argv[])
 				it->second.pop_back();
 			}
 
-			// Create dummy sectors for placing transfer specials if there doesn't exist any sector with particular light
+			// Phase 2: Create dummy sectors for placing transfer specials
 			int dummy_sectors = 0;
 			int dummy_sectors_tagged = 0;
 			min_x = min_x & (~31);
@@ -1396,7 +1426,7 @@ int main (int argc, char *argv[])
 				}
 			}
 
-			// *** PART 4e: Process vertex properties not directly settable and place additional things into map
+			// *** PART 4f: Process vertex properties not directly settable and place additional things into map
 			int things_added = 0;
 			for (int i = 0; i < num_vertexes; i++)
 			{

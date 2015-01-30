@@ -34,6 +34,9 @@ ProblemType process_thing(thing_hexen_t *thing, char *key, int int_val)
 	else if (strncmp(key, "arg", 3) == 0)
 	{
 		int argnum = key[3] - '0';
+		// For SkyPicker, silently trunctate reference to SkyViewpoint. Its tid will be trunctated too.
+		if (thing->type == 9081 && argnum == 0)
+			int_val &= 255;
 		thing->args[argnum] = int_val;
 		if (int_val >= 256 || int_val < 0) return PR_RANGE;
 	}
