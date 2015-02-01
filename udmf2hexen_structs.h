@@ -46,9 +46,10 @@ enum ProblemType
 	PR_OK = 0,
 	PR_UNTRANSLATED = 'U',
 	PR_RANGE = 'R',
+	PR_NOT_SETTABLE = 'N',
 	PR_CONFLICT = 'C',
 	PR_FLOATING = 'F',
-	PR_IGNORE = 'I',
+	PR_INFORMATION = 'I',
 	PR_ERROR = 'E'
 };
 
@@ -174,6 +175,7 @@ struct linedef_more_props_direct
 	uint8_t flags;
 	bool alpha_set;
 	bool additive;
+	bool oversized_arg;
 };
 
 // More linedef properties which must be set from a script or by a transfer special
@@ -181,7 +183,7 @@ struct linedef_more_props_indirect
 {
 	// If some dummy special was put to a line, the previous special must be set from script
 	uint8_t special;
-	uint8_t args[5];
+	int args[5];
 	uint16_t more_block_types;
 	sidedef_more_props sides[2];
 };

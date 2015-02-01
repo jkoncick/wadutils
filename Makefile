@@ -45,7 +45,7 @@ mapoptimizer.o: mapoptimizer.cpp $(HEADERS)
 udmf2hexen: udmf2hexen.o $(OBJFILES)
 	$(CPP) $(CPPFLAGS) -o $@ $^
 
-udmf2hexen.o: udmf2hexen.cpp udmf2hexen_structs.h udmf2hexen_parse_textmap.cpp udmf2hexen_translate_fields.cpp $(HEADERS)
+udmf2hexen.o: udmf2hexen.cpp udmf2hexen_structs.h udmf2hexen_specials.h udmf2hexen_parse_textmap.cpp udmf2hexen_translate_fields.cpp $(HEADERS)
 	$(CPP) $(CPPFLAGS) -c -o $@ udmf2hexen.cpp
 
 wad_file.o: wad_file.cpp $(HEADERS)

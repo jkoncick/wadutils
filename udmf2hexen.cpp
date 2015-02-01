@@ -2,6 +2,7 @@
 #include <queue>
 
 #include "udmf2hexen_structs.h"
+#include "udmf2hexen_specials.h"
 #include "udmf2hexen_parse_textmap.cpp"
 #include "udmf2hexen_translate_fields.cpp"
 
@@ -12,7 +13,7 @@
 bool backup_and_clear_line_special(linedef_hexen_t *line, linedef_more_props_indirect *mprops)
 {
 	int sp = line->special;
-	// Assure that all arguments are zero
+	// Assure that all arguments are zero for "No special"
 	if (sp == 0)
 	{
 		for (int i = 0; i < 5; i++)
@@ -26,7 +27,8 @@ bool backup_and_clear_line_special(linedef_hexen_t *line, linedef_more_props_ind
 		line->special = 0;
 		for (int i = 0; i < 5; i++)
 		{
-			mprops->args[i] = line->args[i];
+			if (!mprops->args[i])
+				mprops->args[i] = line->args[i];
 			line->args[i] = 0;
 		}
 		return true;
@@ -723,7 +725,7 @@ int main (int argc, char *argv[])
 					// Clear lower and upper textures if they are not visible at all.
 					// Both sectors need to have zero tag.
 					// Otherwise they could move up or down and upper/lower texture can become visible.
-					if (sector_front->tag == 0 && sector_back->tag == 0)
+					if (sector_front->tag == sector_back->tag)
 					{
 						if (sector_front->floorht >= sector_back->floorht)
 							lowertex_removed = true;
@@ -938,7 +940,7 @@ int main (int argc, char *argv[])
 					if (plprops->light_set && !plprops->lightabsolute && sector->tag && !(txprops->flags & TF_NO_LIGHT_TAGGING))
 					{
 						printf("I Sector %4d (tag %3d): %s light is %3d (relative %3d) (%-8.8s)\n", i, sector->tag,
-							   plane_str[p], plprops->light, plprops->light - sector->light, sector->floortex);
+							   plane_str[p], plprops->light, plprops->light - sector->light, texture);
 						plprops->light += (sector->tag << 8);
 					}
 				}
@@ -1034,7 +1036,7 @@ int main (int argc, char *argv[])
 						printf("I Polyobject number %d trunctated to %d\n", thing->angle, thing->angle & 255);
 					thing->angle &= 255;
 				}
-				if (thing->type == 9080)
+				if (thing->type == 9080 && thing->tid > 255)
 				{
 					printf("I SkyViewpoint tid %d trunctated to %d\n", thing->tid, thing->tid & 255);
 					thing->tid &= 255;
@@ -1050,6 +1052,10 @@ int main (int argc, char *argv[])
 			{
 				linedef_more_props_direct *mprops = &linedefs_mprops_dir[i];
 				linedef_hexen_t *line = &linedefs[i];
+				if (mprops->oversized_arg)
+				{
+					specials_replaced += backup_and_clear_line_special(line, &linedefs_mprops_indir[i]);
+				}
 				if (mprops->alpha_set)
 				{
 					if (line->special == 208)
@@ -1312,7 +1318,7 @@ int main (int argc, char *argv[])
 					// Linedef has a special we need to duplicate
 					queue<int> lines_to_split;
 					lines_to_split.push(i);
-					while (!new_tags.empty())
+					for (unsigned int j = 0; j < new_tags.size(); j++)
 					{
 						int linenum = lines_to_split.front();
 						lines_to_split.pop();
@@ -1330,8 +1336,7 @@ int main (int argc, char *argv[])
 						linedefs[num_linedefs].beginvertex = num_vertexes++;
 						linedefs[num_linedefs].rsidedef = num_sidedefs++;
 						// Put reference to new sector tag on new linedef
-						linedefs[num_linedefs].args[0] = new_tags.back();
-						new_tags.pop_back();
+						linedefs[num_linedefs].args[0] = new_tags[j];
 						// Insert both linedefs into queue
 						lines_to_split.push(linenum);
 						lines_to_split.push(num_linedefs++);

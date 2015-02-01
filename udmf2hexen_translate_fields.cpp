@@ -70,7 +70,7 @@ ProblemType process_thing(thing_hexen_t *thing, char *key, int int_val)
 #define LSETVAL(str, var) SETVAL(linedef, str, var)
 #define LSETFLAG(str, flag) SETFLAG(linedef, flags, str, flag)
 #define LSETACTV(str, flag) else if (strcmp(key, str) == 0) \
-	{if (linedef->flags & (7 << 10)) return PR_CONFLICT; linedef->flags |= flag;}
+	{if (linedef->flags & (7 << 10)) return PR_NOT_SETTABLE; linedef->flags |= flag;}
 #define LSETMFLAG(str, flag) SETFLAG(mprops, flags, str, flag)
 #define LSETMBLOCK(str, flag) SETFLAG(mprops2, more_block_types, str, flag)
 
@@ -96,11 +96,25 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct 
 		// Trunctate alpha argument to 255 for 3D floors
 		if (linedef->special == 160 && argnum == 3 && int_val > 255)
 			int_val = 255;
-		// Set high bytes for specials which provide it
-		SET_HIGH_BYTE(160, 0, 4)
+		// Set sector tag high-byte for 3D floors
+		if (linedef->special == 160 && argnum == 0 && int_val > 255)
+		{
+			linedef->args[4] = int_val >> 8;
+			int_val &= 255;
+		}
+		// For polyobject-related specials silently trunctate polyobject number
+		if (specials[linedef->special].type == SP_POLYOBJ && argnum < specials[linedef->special].num_tags)
+			int_val &= 255;
+		// For all specials settable by SetLineSpecial, save arguments greater than 255 (they will be set with a script)
+		if (specials[linedef->special].settable && (int_val > 255 || int_val < 0))
+		{
+			mprops->oversized_arg = true;
+			mprops2->args[argnum] = int_val;
+			int_val &= 255;
+		}
 
 		linedef->args[argnum] = int_val;
-		if (int_val >= 256 || int_val < 0) return PR_RANGE;
+		if (int_val > 255 || int_val < 0) return PR_RANGE;
 	}
 	LSETFLAG("blocking", LHF_BLOCKING);
 	LSETFLAG("blockmonsters", LHF_BLOCKMONSTERS);
@@ -123,7 +137,7 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct 
 		if ((linedef->flags & (7 << 10)) == LHF_SPAC_Use)
 			linedef->flags |= LHF_MONSTERSCANACTIVATE;
 		else
-			return PR_CONFLICT;
+			return PR_NOT_SETTABLE;
 	}
 	LSETACTV("impact", LHF_SPAC_Impact)
 	LSETACTV("playerpush", LHF_SPAC_Push)
