@@ -253,7 +253,7 @@ void print_help(const char* prog)
 		"  -r: Resolve-conflicts mode (assign new tags to conflicting sectors)\n"
 		"  -t: Use \"textures.txt\" for texture-based conversion optimizations\n"
 		"  -g flags: Global flags for texture-based conversion optimizations\n"
-		"  -f: Log floating-point values trunctation problems\n"
+		"  -f: Log floating-point values truncation problems\n"
 		"  -p: Log UDMF-specific properties of sectors and sidedefs\n"
 		);
 }
@@ -433,6 +433,7 @@ int main (int argc, char *argv[])
 			static linedef_more_props_direct   linedefs_mprops_dir  [MAX_LINEDEFS];
 			static linedef_more_props_indirect linedefs_mprops_indir[MAX_LINEDEFS];
 			static sector_more_props           sectors_mprops       [MAX_SECTORS];
+			static thing_more_props            things_mprops         [MAX_THINGS];
 			// Counters for entities
 			int num_things = 0;
 			int num_vertexes = 0;
@@ -461,6 +462,7 @@ int main (int argc, char *argv[])
 			memset(linedefs_mprops_dir, 0, sizeof(linedef_more_props_direct) * MAX_LINEDEFS);
 			memset(linedefs_mprops_indir, 0, sizeof(linedef_more_props_indirect) * MAX_LINEDEFS);
 			memset(sectors_mprops, 0, sizeof(sector_more_props) * MAX_SECTORS);
+			memset(things_mprops, 0, sizeof(thing_more_props) * MAX_THINGS);
 			memset(additional_script, 0, SCRIPT_SIZE);
 
 			// Initialize sidedef number to "no sidedef" in all linedefs
@@ -496,8 +498,8 @@ int main (int argc, char *argv[])
 			char *str_value;
 			int int_value; // For bool, int and float value
 			float float_value;
-			// Variables for reporting trunctated floating-point values
-			bool trunctate_problem = false;
+			// Variables for reporting truncated floating-point values
+			bool truncate_problem = false;
 			float float_x = 0.0;
 			float float_y = 0.0;
 			float float_height = 0.0;
@@ -522,15 +524,15 @@ int main (int argc, char *argv[])
 				}
 				else if (line_type == LN_END)
 				{
-					// Now it's time to report floating-point trunctation problem
-					if (arg_log_floating && trunctate_problem)
+					// Now it's time to report floating-point truncation problem
+					if (arg_log_floating && truncate_problem)
 					{
 						if (current_entity == ENT_THING)
 							printf("F Thing %4d (type %5d): x = %9.3f  y = %9.3f  height: %9.3f\n", num_things,
 								   things[num_things].type, float_x, float_y, float_height);
 						else if (current_entity == ENT_VERTEX)
 							printf("F Vertex %4d: x = %9.3f  y = %9.3f\n", num_vertexes, float_x, float_y);
-						trunctate_problem = false;
+						truncate_problem = false;
 						float_height = 0.0;
 					}
 
@@ -546,7 +548,7 @@ int main (int argc, char *argv[])
 				switch (current_entity)
 				{
 					case ENT_THING:
-						problem = process_thing(&things[num_things], key, int_value);
+						problem = process_thing(&things[num_things], &things_mprops[num_things], key, int_value);
 						break;
 					case ENT_VERTEX:
 					{
@@ -609,20 +611,20 @@ int main (int argc, char *argv[])
 					default: ;
 				}
 
-				// Save original values of coordinates for further trunctation problem report
+				// Save original values of coordinates for further truncation problem report
 				if (arg_log_floating && (strcmp(key, "x") == 0 || strcmp(key, "y") == 0) &&
 						(current_entity == ENT_THING || current_entity == ENT_VERTEX))
 				{
 					if(key[0] == 'x') float_x = float_value;
 					else			  float_y = float_value;
 					if (line_type == VAL_FLOAT)
-						trunctate_problem = true;
+						truncate_problem = true;
 				}
 				if (arg_log_floating && strcmp(key, "height") == 0 && current_entity == ENT_THING)
 				{
 					float_height = float_value;
 					if (line_type == VAL_FLOAT)
-						trunctate_problem = true;
+						truncate_problem = true;
 				}
 
 				// Report string values for textures longer than 8
@@ -835,6 +837,28 @@ int main (int argc, char *argv[])
 						   side->uppertex, mprops->offsetx_top, mprops->offsety_top);
 			}
 
+			for (int i = 0; i < num_linedefs; i++)
+			{
+				linedef_hexen_t *line = &linedefs[i];
+				linedef_more_props_indirect *mprops = &linedefs_mprops_indir[i];
+				if (line->lsidedef == 65535 || line->special != 0 || linedefs_mprops_dir[i].lineid != 0)
+					continue;
+				int hashfront = compute_hash((uint8_t *)&mprops->sides[SIDE_FRONT], sizeof(sidedef_more_props));
+				int hashback = compute_hash((uint8_t *)&mprops->sides[SIDE_BACK], sizeof(sidedef_more_props));
+				if (hashfront == 0 && hashback != 0)
+				{
+					// Flip linedef
+					memcpy(&mprops->sides[SIDE_FRONT], &mprops->sides[SIDE_BACK], sizeof(sidedef_more_props));
+					memset(&mprops->sides[SIDE_BACK], 0, sizeof(sidedef_more_props));
+					int tmp = line->beginvertex;
+					line->beginvertex = line->endvertex;
+					line->endvertex = tmp;
+					tmp = line->rsidedef;
+					line->rsidedef = line->lsidedef;
+					line->lsidedef = tmp;
+				}
+			}
+
 			// *** PART 3b: Post-process sidedef more properties (like light level)
 			for (int i = 0; i < num_sidedefs; i++)
 			{
@@ -1033,12 +1057,12 @@ int main (int argc, char *argv[])
 				if (thing->type >= 9300 && thing->type <= 9303 && thing->angle > 255)
 				{
 					if (thing->type == 9300)
-						printf("I Polyobject number %d trunctated to %d\n", thing->angle, thing->angle & 255);
+						printf("I Polyobject number %d truncated to %d\n", thing->angle, thing->angle & 255);
 					thing->angle &= 255;
 				}
 				if (thing->type == 9080 && thing->tid > 255)
 				{
-					printf("I SkyViewpoint tid %d trunctated to %d\n", thing->tid, thing->tid & 255);
+					printf("I SkyViewpoint tid %d truncated to %d\n", thing->tid, thing->tid & 255);
 					thing->tid &= 255;
 				}
 			}
@@ -1089,6 +1113,7 @@ int main (int argc, char *argv[])
 					max_used_lineid = lineid;
 			}
 			int extra_lineid_count = 0;
+			int affected_linedef_count = 0;
 
 			// Second find all linedefs with same specials and assign them tags
 			map<uint32_t, int> linedefs_mprops_hash_map;
@@ -1128,6 +1153,7 @@ int main (int argc, char *argv[])
 						linedefs_mprops_hash_map[hash] = i;
 						int new_lineid = max_used_lineid + (++extra_lineid_count);
 						set_line_id(line, new_lineid, 0, i);
+						affected_linedef_count++;
 						lineid_to_linenum_map[new_lineid] = i;
 						break;
 					}
@@ -1137,6 +1163,7 @@ int main (int argc, char *argv[])
 						// Specials are same, can assign same id to this linedef
 						int lineid = get_line_id(&linedefs[hash_it->second]);
 						set_line_id(line, lineid, 0, i);
+						affected_linedef_count++;
 						break;
 					}
 					// Properties differ -> hash collision. Use next hash.
@@ -1180,6 +1207,18 @@ int main (int argc, char *argv[])
 					if (sidmprops->offsetx_top || sidmprops->offsety_top)
 						scr+=sprintf(scr,"   Line_SetTextureOffset(%d, %d.0, %d.0, %d, 9);\n", lineid,
 						   sidmprops->offsetx_top, sidmprops->offsety_top, side);
+					if (sidmprops->scalex_bottom || sidmprops->scaley_bottom)
+						scr+=sprintf(scr,"   Line_SetTextureScale(%d, %.3f, %.3f, %d, 4);\n", lineid,
+						   sidmprops->scalex_bottom?sidmprops->scalex_bottom:1.0,
+						   sidmprops->scaley_bottom?sidmprops->scaley_bottom:1.0, side);
+					if (sidmprops->scalex_mid || sidmprops->scaley_mid)
+						scr+=sprintf(scr,"   Line_SetTextureScale(%d, %.3f, %.3f, %d, 2);\n", lineid,
+						   sidmprops->scalex_mid?sidmprops->scalex_mid:1.0,
+						   sidmprops->scaley_mid?sidmprops->scaley_mid:1.0, side);
+					if (sidmprops->scalex_top || sidmprops->scaley_top)
+						scr+=sprintf(scr,"   Line_SetTextureScale(%d, %.3f, %.3f, %d, 1);\n", lineid,
+						   sidmprops->scalex_top?sidmprops->scalex_top:1.0,
+						   sidmprops->scaley_top?sidmprops->scaley_top:1.0, side);
 				}
 			}
 
@@ -1193,6 +1232,8 @@ int main (int argc, char *argv[])
 					max_used_tag = sectors[i].tag;
 			}
 			int extra_sector_tag_count = 0;
+			int extra_sector_tag_replacing_count = 0;
+			int affected_sector_count = 0;
 
 			// Second find all sectors with same-properties and assign them tags
 			map<uint32_t, int> sectors_mprops_hash_map;
@@ -1244,11 +1285,13 @@ int main (int argc, char *argv[])
 						sectors_mprops_hash_map[hash] = i;
 						int new_tag = max_used_tag + (++extra_sector_tag_count);
 						sectors[i].tag = new_tag;
+						affected_sector_count++;
 						if (mprops->original_tag)
 						{
 							printf("C Sector %5d: Tag %d was changed to %d due to conflict.\n",
 								   i, mprops->original_tag, new_tag);
 							new_assigned_tags[mprops->original_tag].push_back(new_tag);
+							extra_sector_tag_replacing_count++;
 						}
 						tag_to_secnum_map[new_tag] = i;
 						break;
@@ -1258,6 +1301,7 @@ int main (int argc, char *argv[])
 					{
 						// Properties are same, can assign same tag to this sector
 						sectors[i].tag = sectors[hash_it->second].tag;
+						affected_sector_count++;
 						if (mprops->original_tag)
 							printf("C Sector %5d: Tag %d was changed to %d due to conflict.\n",
 								   i, mprops->original_tag, sectors[i].tag);
@@ -1303,7 +1347,104 @@ int main (int argc, char *argv[])
 						   (int)mprops->gravity, (int)((mprops->gravity - (int)mprops->gravity)*100.0 + 0.001));
 			}
 
-			// *** PART 4d: Duplicate Sector_Set3dFloor and transfer specials for all newly assigned sector tags
+			// *** PART 4d: Process thing properties not directly settable
+
+			for (int i = 0; i < num_things; i++)
+			{
+				thing_hexen_t *thing = &things[i];
+				thing_more_props *mprops = &things_mprops[i];
+				if (mprops->oversized_arg)
+				{
+					mprops->special = thing->special;
+					for (int j = 0; j < 5; j++)
+					{
+						if (!mprops->args[j])
+							mprops->args[j] = thing->args[j];
+					}
+				}
+			}
+
+			// First get the maximum used thing ID number
+			int max_used_tid = 0;
+			for (int i = 0; i < num_things; i++)
+			{
+				if (things[i].tid > max_used_tid)
+					max_used_tid = things[i].tid;
+			}
+			int extra_thing_id_count = 0;
+			int affected_thing_count = 0;
+
+			// Second find all things with same-properties and assign them IDs
+			map<uint32_t, int> things_mprops_hash_map;
+			map<int, int> tid_to_thingnum_map;
+			for (int i = 0; i < num_things; i++)
+			{
+				// Check for thing ID
+				thing_more_props *mprops = &things_mprops[i];
+				int tid = things[i].tid;
+				if (tid > 0)
+				{
+					// Thing has nonzero tid. Must check if different things with same tid have same properties.
+					map<int, int>::iterator tid_it = tid_to_thingnum_map.find(tid);
+					if (tid_it == tid_to_thingnum_map.end())
+					{
+						// No other thing with same tid exists yet. Just register it and continue.
+						tid_to_thingnum_map[tid] = i;
+						continue;
+					}
+					// Other thing with same tid exists, must check if properties are same
+					if (memcmp(mprops, &things_mprops[tid_it->second], sizeof(thing_more_props)) != 0)
+						// Properties are different = CONFLICT!!!
+						printf("C Sectors %5d and %5d have same tag (%d) but different properties.\n",
+								i, tid_it->second, tid);
+					continue;
+				}
+				// Check for thing more-properties
+				uint32_t hash = compute_hash((uint8_t *)mprops, sizeof(thing_more_props));
+				if (hash == 0)
+					continue;
+				// If thing has zero tid we will give it new tid.
+				// If any thing with same properties already exists, give current thing same tid.
+				while (1)
+				{
+					// Find the hash in hash table. If collision is found, try next hash.
+					map<uint32_t, int>::iterator hash_it = things_mprops_hash_map.find(hash);
+					if (hash_it == things_mprops_hash_map.end())
+					{
+						// Hash not yet exists, create new tid for this thing
+						things_mprops_hash_map[hash] = i;
+						int new_tid = max_used_tid + (++extra_thing_id_count);
+						things[i].tid = new_tid;
+						affected_thing_count++;
+						tid_to_thingnum_map[new_tid] = i;
+						break;
+					}
+					// Hash found, compare both thing more properties
+					if (memcmp(mprops, &things_mprops[hash_it->second], sizeof(thing_more_props)) == 0)
+					{
+						// Properties are same, can assign same tid to this thing
+						things[i].tid = things[hash_it->second].tid;
+						affected_thing_count++;
+						break;
+					}
+					// Properties differ -> hash collision. Use next hash.
+					hash += 13257; // Random value
+				}
+			}
+			// Third create extra script lines to set the properties
+			for (map<int, int>::iterator tid_it = tid_to_thingnum_map.begin(); tid_it != tid_to_thingnum_map.end(); tid_it++)
+			{
+				int tid = tid_it->first;
+				thing_more_props *mprops = &things_mprops[tid_it->second];
+
+				if (mprops->special != 0)
+					scr+=sprintf(scr,"   SetThingSpecial(%d, %d, %d, %d, %d, %d, %d);\n", tid,
+					   mprops->special, mprops->args[0], mprops->args[1], mprops->args[2], mprops->args[3], mprops->args[4]);
+				// Set other more properties
+			}
+
+			// *** PART 4e: Duplicate Sector_Set3dFloor and transfer specials for all newly assigned sector tags
+			int action_specials_duplicated = 0;
 			map<int, vector<int> >::iterator newtags_it;
 			for (newtags_it = new_assigned_tags.begin(); newtags_it != new_assigned_tags.end(); newtags_it++)
 			{
@@ -1313,38 +1454,44 @@ int main (int argc, char *argv[])
 				for (int i = 0; i < num_linedefs; i++)
 				{
 					linedef_hexen_t *line = &linedefs[i];
-					if (!(line->special == 160 && line->args[0] == original_tag))
-						continue;
-					// Linedef has a special we need to duplicate
-					queue<int> lines_to_split;
-					lines_to_split.push(i);
-					for (unsigned int j = 0; j < new_tags.size(); j++)
+					if (specials[line->special].type == SP_TRANSFER && line->args[0] == original_tag)
 					{
-						int linenum = lines_to_split.front();
-						lines_to_split.pop();
-						linedef_hexen_t *line_to_split = &linedefs[linenum];
-						// Split linedef
-						int start_x = vertexes[line_to_split->beginvertex].xpos;
-						int start_y = vertexes[line_to_split->beginvertex].ypos;
-						int end_x = vertexes[line_to_split->endvertex].xpos;
-						int end_y = vertexes[line_to_split->endvertex].ypos;
-						vertexes[num_vertexes].xpos = (start_x + end_x) / 2;
-						vertexes[num_vertexes].ypos = (start_y + end_y) / 2;
-						memcpy(&linedefs[num_linedefs], line_to_split, sizeof(linedef_hexen_t));
-						memcpy(&sidedefs[num_sidedefs], &sidedefs[line_to_split->rsidedef], sizeof(sidedef_t));
-						line_to_split->endvertex = num_vertexes;
-						linedefs[num_linedefs].beginvertex = num_vertexes++;
-						linedefs[num_linedefs].rsidedef = num_sidedefs++;
-						// Put reference to new sector tag on new linedef
-						linedefs[num_linedefs].args[0] = new_tags[j];
-						// Insert both linedefs into queue
-						lines_to_split.push(linenum);
-						lines_to_split.push(num_linedefs++);
+						// Linedef has a special we need to duplicate
+						queue<int> lines_to_split;
+						lines_to_split.push(i);
+						for (unsigned int j = 0; j < new_tags.size(); j++)
+						{
+							int linenum = lines_to_split.front();
+							lines_to_split.pop();
+							linedef_hexen_t *line_to_split = &linedefs[linenum];
+							// Split linedef
+							int start_x = vertexes[line_to_split->beginvertex].xpos;
+							int start_y = vertexes[line_to_split->beginvertex].ypos;
+							int end_x = vertexes[line_to_split->endvertex].xpos;
+							int end_y = vertexes[line_to_split->endvertex].ypos;
+							vertexes[num_vertexes].xpos = (start_x + end_x) / 2;
+							vertexes[num_vertexes].ypos = (start_y + end_y) / 2;
+							memcpy(&linedefs[num_linedefs], line_to_split, sizeof(linedef_hexen_t));
+							memcpy(&sidedefs[num_sidedefs], &sidedefs[line_to_split->rsidedef], sizeof(sidedef_t));
+							line_to_split->endvertex = num_vertexes;
+							linedefs[num_linedefs].beginvertex = num_vertexes++;
+							linedefs[num_linedefs].rsidedef = num_sidedefs++;
+							// Put reference to new sector tag on new linedef
+							linedefs[num_linedefs].args[0] = new_tags[j];
+							action_specials_duplicated++;
+							// Insert both linedefs into queue
+							lines_to_split.push(linenum);
+							lines_to_split.push(num_linedefs++);
+						}
+					}
+					else if (specials[line->special].type == SP_SECTOR && line->args[0] == original_tag)
+					{
+						printf("I Linedef %5d (special %3d): Reference to sector tag %d\n", i, line->special, line->args[0]);
 					}
 				}
 			}
 
-			// *** PART 4e: Place pending transfer specials into map
+			// *** PART 4f: Place pending transfer specials into map
 			int transfer_specials_placed = 0;
 			// Phase 1: Place transfer specials to linedefs facing existing sectors with desired light
 			for (int i = 0; i < num_linedefs; i++)
@@ -1431,7 +1578,7 @@ int main (int argc, char *argv[])
 				}
 			}
 
-			// *** PART 4f: Process vertex properties not directly settable and place additional things into map
+			// *** PART 4g: Process vertex properties not directly settable and place additional things into map
 			int things_added = 0;
 			for (int i = 0; i < num_vertexes; i++)
 			{
@@ -1466,11 +1613,26 @@ int main (int argc, char *argv[])
 			if (extra_lineid_count > 0)
 				printf("Created %d extra line IDs in range (%d - %d).\n", extra_lineid_count,
 					   max_used_lineid + 1, max_used_lineid + extra_lineid_count);
+			if (affected_linedef_count > 0)
+				printf("  %d linedefss were affected by setting them a (new) line ID.\n", affected_linedef_count);
 			if (extra_sector_tag_count > 0)
 				printf("Created %d extra sector tags in range (%d - %d).\n", extra_sector_tag_count,
 					   max_used_tag + 1, max_used_tag + extra_sector_tag_count);
+			if (extra_sector_tag_replacing_count > 0)
+				printf("  %d of them are replacing existing tags in order to resolve conflicts.\n",
+					   extra_sector_tag_replacing_count);
+			if (affected_sector_count > 0)
+				printf("  %d sectors were affected by setting them a (new) tag.\n", affected_sector_count);
+			if (action_specials_duplicated > 0)
+				printf("  %d linedefs were split in order to duplicate a static-init action special.\n",
+					   action_specials_duplicated);
+			if (extra_thing_id_count > 0)
+				printf("Created %d extra thing IDs in range (%d - %d).\n", extra_thing_id_count,
+					   max_used_tid + 1, max_used_tid + extra_thing_id_count);
+			if (affected_thing_count > 0)
+				printf("  %d things were affected by setting them a (new) tid.\n", affected_thing_count);
 			if (transfer_specials_placed > 0)
-				printf("Placed %d light-transfer specials on specific linedefs.\n", transfer_specials_placed);
+				printf("Placed %d light-transfer specials on linedefs in a map.\n", transfer_specials_placed);
 			if (dummy_sectors > 0)
 				printf("  %d dummy sectors were created for this purpose in left-bottom map corner.\n", dummy_sectors);
 			if (dummy_sectors_tagged > 0)

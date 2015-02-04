@@ -142,6 +142,12 @@ struct sidedef_more_props
 	int16_t offsety_bottom;
 	int16_t offsety_mid;
 	int16_t offsety_top;
+	float scalex_bottom;
+	float scalex_mid;
+	float scalex_top;
+	float scaley_bottom;
+	float scaley_mid;
+	float scaley_top;
 };
 
 
@@ -214,5 +220,12 @@ struct sector_more_props
 	uint8_t desaturation;
 };
 
+// More thing properties which must be set from a script
+struct thing_more_props
+{
+	uint8_t special;
+	bool oversized_arg;
+	int args[5];
+};
 
 #endif // UDMF2HEXEN_STRUCTS_H

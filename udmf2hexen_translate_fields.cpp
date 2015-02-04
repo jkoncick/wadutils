@@ -17,7 +17,7 @@
 
 int strip_value(int val);
 
-ProblemType process_thing(thing_hexen_t *thing, char *key, int int_val)
+ProblemType process_thing(thing_hexen_t *thing, thing_more_props *mprops, char *key, int int_val)
 {
 	P_START
 	TSETVAL("id", tid);
@@ -37,6 +37,14 @@ ProblemType process_thing(thing_hexen_t *thing, char *key, int int_val)
 		// For SkyPicker, silently trunctate reference to SkyViewpoint. Its tid will be trunctated too.
 		if (thing->type == 9081 && argnum == 0)
 			int_val &= 255;
+		// For all specials settable by SetLineSpecial, save arguments greater than 255 (they will be set with a script)
+		if (specials[thing->special].settable && (int_val > 255 || int_val < 0))
+		{
+			mprops->oversized_arg = true;
+			mprops->args[argnum] = int_val;
+			int_val &= 255;
+		}
+
 		thing->args[argnum] = int_val;
 		if (int_val >= 256 || int_val < 0) return PR_RANGE;
 	}
@@ -176,6 +184,7 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct 
 #define SIDSETVAL(str, var) SETVAL(sidedef, str, var)
 #define SIDSETSTR(str, var) SETSTR(sidedef, str, var)
 #define SIDSETMVAL(str, var) SETVAL(mprops, str, var)
+#define SIDSETMFVAL(str, var) SETFVAL(mprops, str, var)
 
 ProblemType process_sidedef(sidedef_t *sidedef, sidedef_more_props *mprops,
 							char *key, char *str_val, int int_val, float float_val)
@@ -197,6 +206,12 @@ ProblemType process_sidedef(sidedef_t *sidedef, sidedef_more_props *mprops,
 	SIDSETMVAL("offsety_bottom", offsety_bottom);
 	SIDSETMVAL("offsety_mid", offsety_mid);
 	SIDSETMVAL("offsety_top", offsety_top);
+	SIDSETMFVAL("scalex_bottom", scalex_bottom);
+	SIDSETMFVAL("scalex_mid", scalex_mid);
+	SIDSETMFVAL("scalex_top", scalex_top);
+	SIDSETMFVAL("scaley_bottom", scaley_bottom);
+	SIDSETMFVAL("scaley_mid", scaley_mid);
+	SIDSETMFVAL("scaley_top", scaley_top);
 	P_END
 }
 
