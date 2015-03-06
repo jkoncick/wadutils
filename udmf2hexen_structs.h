@@ -79,7 +79,10 @@ enum TextureFlags
 	TF_NO_ROTATION = 24,
 	TF_NO_SCALE = 32,
 	TF_NO_LIGHT = 64,
-	TF_NO_LIGHT_TAGGING = 128
+	TF_NO_LIGHT_TAGGING = 128,
+	GF_NO_PANNING_1PX = 256,
+	GF_IGNORE_INVISTEX_OFFSET = 512,
+	GF_IGNORE_VERTEX_HEIGHT = 1024
 };
 
 struct TextureProperties
@@ -129,6 +132,8 @@ struct vertex_more_props
 	int16_t zfloor;
 	bool    zceiling_set;
 	int16_t zceiling;
+	int8_t xround;
+	int8_t yround;
 };
 
 // More sidedef properties not directly settable. Will be copied to respective linedef's properties.

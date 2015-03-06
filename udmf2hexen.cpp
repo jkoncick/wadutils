@@ -109,6 +109,8 @@ int get_line_id(linedef_hexen_t *line)
 
 void set_transfer_special(linedef_hexen_t *line, TransferType tr_type, int target_id)
 {
+	if (target_id > 255)
+			printf("E Placing transfer special: Cannot set sector tag / linedef ID %d\n", target_id);
 	switch (tr_type)
 	{
 		case TR_LIGHT_FLOOR:
@@ -213,6 +215,26 @@ void align_plane_props(plane_more_props *srcprops, plane_more_props *destprops, 
 		srcprops->xpanning = destprops->xpanning;
 	if (normalize(abs(srcprops->ypanning - destprops->ypanning), srctxprops->height) == 0)
 		srcprops->ypanning = destprops->ypanning;
+}
+
+void print_sector_mprops(int secnum, sector_t *sector, sector_more_props *mprops)
+{
+	for (int p = PL_FLOOR; p <= PL_CEILING; p++)
+	{
+		plane_more_props *plprops = &mprops->planes[p];
+		const char plane_char[2] = {'F', 'C'};
+		if (plprops->xpanning || plprops->ypanning || plprops->rotation || plprops->light_set)
+			printf("* Sector %4d (tag %3d) %c: %-8.8s xpan %3d ypan %3d rotation %3d light %3d\n",
+				   secnum, sector->tag, plane_char[p], (p == PL_FLOOR)?sector->floortex:sector->ceiltex,
+				   plprops->xpanning, plprops->ypanning, plprops->rotation, plprops->light & 255);
+		if (plprops->xscale_set || plprops->yscale_set)
+			printf("* Sector %4d (tag %3d) %c: %-8.8s xscale %5.3f yscale %5.3f\n",
+				   secnum, sector->tag, plane_char[p], (p == PL_FLOOR)?sector->floortex:sector->ceiltex,
+				   plprops->xscale, plprops->yscale);
+	}
+	if (mprops->fadecolor || mprops->lightcolor || mprops->desaturation || mprops->gravity_set)
+		printf("* Sector %4d (tag %3d): fade %06X light %06X desat %3d gravity %5.3f\n",
+			   secnum, sector->tag, mprops->fadecolor, mprops->lightcolor, mprops->desaturation, mprops->gravity);
 }
 
 // *********************************************************** //
@@ -552,30 +574,8 @@ int main (int argc, char *argv[])
 						break;
 					case ENT_VERTEX:
 					{
-						if (key[0] == 'x')
-						{
-							vertexes[num_vertexes].xpos = int_value;
-							if (int_value < min_x)
-								min_x = int_value;
-						}
-						else if (key[0] == 'y')
-						{
-							vertexes[num_vertexes].ypos = int_value;
-							if (int_value < min_y)
-								min_y = int_value;
-						}
-						else if (strcmp(key, "zfloor") == 0)
-						{
-							vertexes_mprops[num_vertexes].zfloor_set = true;
-							vertexes_mprops[num_vertexes].zfloor = int_value;
-						}
-						else if (strcmp(key, "zceiling") == 0)
-						{
-							vertexes_mprops[num_vertexes].zceiling_set = true;
-							vertexes_mprops[num_vertexes].zceiling = int_value;
-						}
-						else
-							problem = PR_UNTRANSLATED;
+						problem = process_vertex(&vertexes[num_vertexes], &vertexes_mprops[num_vertexes],
+												 key, int_value, float_value, &min_x, &min_y);
 						break;
 					}
 					case ENT_LINEDEF:
@@ -727,7 +727,7 @@ int main (int argc, char *argv[])
 					// Clear lower and upper textures if they are not visible at all.
 					// Both sectors need to have zero tag.
 					// Otherwise they could move up or down and upper/lower texture can become visible.
-					if (sector_front->tag == sector_back->tag)
+					if (sector_front->tag == sector_back->tag || arg_global_texture_flags & GF_IGNORE_INVISTEX_OFFSET)
 					{
 						if (sector_front->floorht >= sector_back->floorht)
 							lowertex_removed = true;
@@ -927,9 +927,19 @@ int main (int argc, char *argv[])
 						plprops->ypanning = 0;
 					}
 					if (!plprops->xscale_set)
+					{
 						plprops->xpanning = normalize(plprops->xpanning, txprops->width);
+						if (arg_global_texture_flags & GF_NO_PANNING_1PX &&
+								(plprops->xpanning - txprops->width == -1 || plprops->xpanning == 1))
+							plprops->xpanning = 0;
+					}
 					if (!plprops->yscale_set)
+					{
 						plprops->ypanning = normalize(plprops->ypanning, txprops->height);
+						if (arg_global_texture_flags & GF_NO_PANNING_1PX &&
+								(plprops->ypanning - txprops->height == -1 || plprops->ypanning == 1))
+							plprops->ypanning = 0;
+					}
 
 					if (plprops->xpanning == 0 && plprops->ypanning == 0)
 						plprops->rotation = normalize(plprops->rotation, txprops->rotation_limit);
@@ -970,21 +980,9 @@ int main (int argc, char *argv[])
 				}
 
 				// Print sector properties if needed
-				if (!arg_print_properties)
-					continue;
-				for (int p = PL_FLOOR; p <= PL_CEILING; p++)
-				{
-					plane_more_props *plprops = &mprops->planes[p];
-					const char plane_char[2] = {'F', 'C'};
-					if (plprops->xpanning || plprops->ypanning || plprops->rotation || plprops->light_set)
-						printf("* Sector %4d (tag %3d) %c: %-8.8s xpan %3d ypan %3d rotation %3d light %3d\n",
-							   i, sector->tag, plane_char[p], (p == PL_FLOOR)?sector->floortex:sector->ceiltex,
-							   plprops->xpanning, plprops->ypanning, plprops->rotation, plprops->light & 255);
-					if (plprops->xscale_set || plprops->yscale_set)
-						printf("* Sector %4d (tag %3d) %c: %-8.8s xscale %5.3f yscale %5.3f\n",
-							   i, sector->tag, plane_char[p], (p == PL_FLOOR)?sector->floortex:sector->ceiltex,
-							   plprops->xscale, plprops->yscale);
-				}
+				if (arg_print_properties)
+					print_sector_mprops(i, sector, mprops);
+
 			}
 
 			// *** PART 3d: Align sector more-properties to make as few unique more-properties as possible
@@ -1067,6 +1065,55 @@ int main (int argc, char *argv[])
 				}
 			}
 
+			// *** PART 3f: Fix vertexes overlapping with other vertexes or linedefs caused by rounding the coordinates
+			for (int i = 0; i < num_vertexes; i++)
+			{
+				vertex_t *vertex = &vertexes[i];
+				vertex_more_props *mprops = &vertexes_mprops[i];
+				if (mprops->xround == 0 && mprops->yround == 0)
+					continue; // Coordinates were integers, no need to check
+				// Check if vertex overlaps with other vertex
+				for (int j = 0; j < num_vertexes; j++)
+				{
+					if (i != j && vertex->xpos == vertexes[j].xpos && vertex->ypos == vertexes[j].ypos)
+					{
+						//printf("O Vertex %4d overlaps with vertex %4d.\n", i, j);
+						vertex->xpos += mprops->xround;
+						vertex->ypos += mprops->yround;
+					}
+				}
+				// Check if vertex overlaps with a linedef (only strictly horizontal or vertical linedef)
+				for (int j = 0; j < num_linedefs; j++)
+				{
+					vertex_t *v1 = &vertexes[linedefs[j].beginvertex];
+					vertex_t *v2 = &vertexes[linedefs[j].endvertex];
+					if (v1->ypos == v2->ypos)
+					{ // Horizontal linedef
+						if (vertex->ypos != v1->ypos)
+							continue;
+						int min_xpos = min(v1->xpos, v2->xpos);
+						int max_xpos = max(v1->xpos, v2->xpos);
+						if (vertex->xpos > min_xpos && vertex->xpos < max_xpos)
+						{
+							//printf("O Vertex %4d overlaps with linedef %4d.\n", i, j);
+							vertex->ypos += mprops->yround;
+						}
+					}
+					if (v1->xpos == v2->xpos)
+					{ // Vertical linedef
+						if (vertex->xpos != v1->xpos)
+							continue;
+						int min_ypos = min(v1->ypos, v2->ypos);
+						int max_ypos = max(v1->ypos, v2->ypos);
+						if (vertex->ypos > min_ypos && vertex->ypos < max_ypos)
+						{
+							//printf("O Vertex %4d overlaps with linedef %4d.\n", i, j);
+							vertex->xpos += mprops->xround;
+						}
+					}
+				}
+			}
+
 			// *********************************************************** //
 			// PART FOUR: Setting UDMF-only properties (scripts, specials) //
 			// *********************************************************** //
@@ -1089,9 +1136,12 @@ int main (int argc, char *argv[])
 						continue;
 					}
 					specials_replaced += backup_and_clear_line_special(line, &linedefs_mprops_indir[i]);
-					line->special = 208;
-					line->args[1] = mprops->alpha;
-					line->args[2] = mprops->additive?1:0;
+					if (line->special == 0)
+					{
+						line->special = 208;
+						line->args[1] = mprops->alpha;
+						line->args[2] = mprops->additive?1:0;
+					}
 					set_line_id(line, mprops->lineid, mprops->flags, i);
 				}
 				else if (mprops->flags || mprops->lineid)
@@ -1262,8 +1312,15 @@ int main (int argc, char *argv[])
 					// Properties are different = CONFLICT!!!
 					if (!arg_resolve_conflicts)
 					{
+						//if (arg_print_properties)
+						//	printf("\n");
 						printf("C Sectors %5d and %5d have same tag (%d) but different properties.\n",
-							   i, tag_it->second, tag);
+							   i, other_sec_num, tag);
+						//if (arg_print_properties)
+						//{
+						//	print_sector_mprops(i, &sectors[i], mprops);
+						//	print_sector_mprops(other_sec_num, &sectors[other_sec_num], other_sec_mprops);
+						//}
 						continue;
 					}
 					// Conflict needs to be resolved, so we let assign this sector different tag
@@ -1477,7 +1534,16 @@ int main (int argc, char *argv[])
 							linedefs[num_linedefs].beginvertex = num_vertexes++;
 							linedefs[num_linedefs].rsidedef = num_sidedefs++;
 							// Put reference to new sector tag on new linedef
-							linedefs[num_linedefs].args[0] = new_tags[j];
+							int new_tag = new_tags[j];
+							linedefs[num_linedefs].args[0] = new_tag;
+							if (new_tag > 255)
+							{
+								if (line_to_split->special == 160 && (line_to_split->args[1] & 8) == 0)
+									linedefs[num_linedefs].args[4] = new_tag >> 8;
+								else
+									printf("E Linedef %5d (special %3d): Cannot set sector tag %d (linedef split)\n",
+										   linenum, line_to_split->special, new_tag);
+							}
 							action_specials_duplicated++;
 							// Insert both linedefs into queue
 							lines_to_split.push(linenum);
@@ -1582,6 +1648,8 @@ int main (int argc, char *argv[])
 			int things_added = 0;
 			for (int i = 0; i < num_vertexes; i++)
 			{
+				if (arg_global_texture_flags & GF_IGNORE_VERTEX_HEIGHT)
+					break;
 				vertex_t *vertex = &vertexes[i];
 				vertex_more_props *mprops = &vertexes_mprops[i];
 				if (mprops->zfloor_set)

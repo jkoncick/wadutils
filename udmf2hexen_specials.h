@@ -242,7 +242,7 @@ ActionSpecial specials[256] = {
 	/* 217 */ {"Stairs_BuildUpDoom",                   0, true  , SP_SECTOR        ,1 },
 	/* 218 */ {"Sector_SetWind",                       0, true  , SP_SECTOR        ,1 },
 	/* 219 */ {"Sector_SetFriction",                   0, true  , SP_SECTOR        ,1 },
-	/* 220 */ {"Sector_SetCurrent",                    0, true  , SP_SECTOR        ,1 },
+	/* 220 */ {"Sector_SetCurrent",                    0, true  , SP_TRANSFER      ,1 },
 	/* 221 */ {"Scroll_Texture_Both",                  0, true  , SP_MISC          ,0 },
 	/* 222 */ {"Scroll_Texture_Model",                 0, false , SP_MISC          ,0 },
 	/* 223 */ {"Scroll_Floor",                         0, true  , SP_SECTOR        ,0 },

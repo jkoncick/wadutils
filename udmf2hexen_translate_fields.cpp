@@ -75,6 +75,44 @@ ProblemType process_thing(thing_hexen_t *thing, thing_more_props *mprops, char *
 	P_END
 }
 
+ProblemType process_vertex(vertex_t *vertex, vertex_more_props *mprops, char *key, int int_val, float float_val,
+						   int *min_x, int *min_y)
+{
+	if (strcmp(key, "x") == 0)
+	{
+		vertex->xpos = int_val;
+		if (int_val < (*min_x))
+			*min_x = int_val;
+		if (float_val < int_val)
+			mprops->xround = -1;
+		if (float_val > int_val)
+			mprops->xround = 1;
+	}
+	else if (strcmp(key, "y") == 0)
+	{
+		vertex->ypos = int_val;
+		if (int_val < (*min_y))
+			*min_y = int_val;
+		if (float_val < int_val)
+			mprops->yround = -1;
+		if (float_val > int_val)
+			mprops->yround = 1;
+	}
+	else if (strcmp(key, "zfloor") == 0)
+	{
+		mprops->zfloor_set = true;
+		mprops->zfloor = int_val;
+	}
+	else if (strcmp(key, "zceiling") == 0)
+	{
+		mprops->zceiling_set = true;
+		mprops->zceiling = int_val;
+	}
+	else
+		return PR_UNTRANSLATED;
+	return PR_OK;
+}
+
 #define LSETVAL(str, var) SETVAL(linedef, str, var)
 #define LSETFLAG(str, flag) SETFLAG(linedef, flags, str, flag)
 #define LSETACTV(str, flag) else if (strcmp(key, str) == 0) \
@@ -149,6 +187,22 @@ ProblemType process_linedef(linedef_hexen_t *linedef, linedef_more_props_direct 
 	}
 	LSETACTV("impact", LHF_SPAC_Impact)
 	LSETACTV("playerpush", LHF_SPAC_Push)
+	else if (strcmp(key, "monsterpush") == 0)
+	{
+		if ((linedef->flags & (7 << 10)) == LHF_SPAC_Cross)
+		{	// Emulate "monsterpush" by "playerpush" + "monsterscanactivate"
+			linedef->flags |= LHF_SPAC_Push;
+			linedef->flags |= LHF_MONSTERSCANACTIVATE;
+			return PR_INFORMATION;
+		}
+		else if ((linedef->flags & (7 << 10)) == LHF_SPAC_Use)
+		{
+			linedef->flags |= LHF_MONSTERSCANACTIVATE;
+			return PR_INFORMATION;
+		}
+		else
+			return PR_NOT_SETTABLE;
+	}
 	LSETACTV("missilecross", LHF_SPAC_PCross)
 	//LSETACTV("passuse", LHF_SPAC_UseThrough)
 	else if (strcmp(key, "id") == 0)
